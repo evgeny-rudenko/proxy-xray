@@ -1,0 +1,9 @@
+# Ignore all
+**
+
+# Allow only docker duild files
+!Dockerfile
+!*.sh
+!*.py
+!proxy_xray
+!proxy_xray/*.py

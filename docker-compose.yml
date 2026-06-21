@@ -1,0 +1,112 @@
+services:
+  proxy-xray:
+    build: .
+    image: proxy-xray:local
+    container_name: proxy-xray
+    restart: unless-stopped
+    command:
+      - --dns-global
+      - "8.8.8.8,1.1.1.1"
+      - --dns-ru
+      - "77.88.8.8,77.88.8.1"
+      - --dns-split-ru
+      - --sub-url
+      - "${XRAY_SUB_URL:?set XRAY_SUB_URL in .env}"
+      - --sub-extra-file
+      - "/opt/proxy-xray/vless-extra.txt"
+      - --sub-prefer
+      - "us,eu"
+      - --sub-exclude
+      - "ru,russia,russian,россия,москва,moscow"
+      - --sub-refresh-interval
+      - "7200"
+      - --sub-fetch-mode
+      - "auto"
+      - --sub-fetch-proxy
+      - "socks5h://127.0.0.1:1080"
+      - --sub-post-start-refresh-delay
+      - "15"
+      - --sub-check-interval
+      - "60"
+      - --sub-max-failures
+      - "3"
+      - --sub-degrade-latency
+      - "6"
+      - --sub-degrade-checks
+      - "3"
+      - --sub-retry-interval
+      - "300"
+      - --sub-state-file
+      - "/opt/proxy-xray/state.json"
+      - --sub-observatory-probe-interval
+      - "10s"
+      - --sub-balancer-strategy
+      - "leastPing"
+      - --throughput-check-interval
+      - "300"
+      - --throughput-url
+      - "https://speed.cloudflare.com/__down?bytes=2000000"
+      - --throughput-min-kbps
+      - "1500"
+      - --throughput-max-time
+      - "20"
+      - --throughput-degrade-checks
+      - "3"
+      - --standby-max-age
+      - "600"
+      - --failover-cooldown
+      - "180"
+      - --quarantine-duration
+      - "900"
+      - --candidate-check-min-interval
+      - "120"
+      - --candidate-check-max-interval
+      - "300"
+      - --candidate-check-timeout
+      - "10"
+      - --candidate-check-extra-weight
+      - "5"
+      - --active-path-interval
+      - "15"
+      - --asset-dir
+      - "/opt/proxy-xray/assets"
+      - --asset-refresh-interval
+      - "86400"
+      - --asset-fetch-timeout
+      - "30"
+      - --no-asset-refresh-on-start
+      - --status-listen
+      - "0.0.0.0"
+      - --status-port
+      - "18080"
+      - --inbound-vless
+      - --inbound-vless-port
+      - "10086"
+      - --inbound-vless-id
+      - "${INBOUND_VLESS_ID:?set INBOUND_VLESS_ID in .env}"
+      - --domain-direct
+      - "geosite:category-ru"
+      - --domain-direct
+      - "regexp:.*\\.ru$"
+      - --domain-direct
+      - "regexp:.*\\.su$"
+      - --domain-direct
+      - "regexp:.*\\.xn--p1ai$"
+      - --ip-direct
+      - "geoip:ru"
+    environment:
+      TZ: "${TZ:-Europe/Moscow}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+    ports:
+      - "0.0.0.0:1080:1080"
+      - "0.0.0.0:1080:1080/udp"
+      - "0.0.0.0:8123:8123"
+      - "0.0.0.0:10086:10086"
+      - "0.0.0.0:18080:18080"
+      # DNS не трогаем, если он тебе не нужен
+      # - "127.0.0.1:53:53/udp"
+    volumes:
+      - ./vless-extra.txt:/opt/proxy-xray/vless-extra.txt:ro
+      - ./state.json:/opt/proxy-xray/state.json
+      - ./assets:/opt/proxy-xray/assets

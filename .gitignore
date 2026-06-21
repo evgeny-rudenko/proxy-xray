@@ -1,0 +1,13 @@
+__pycache__/
+proxy_xray/__pycache__/
+*.pyc
+.DS_Store
+assets/
+.env
+state.json
+vless-extra.txt
+vless-lan-qr.png
+status-current.png
+status-new-live.png
+status-redesign-mockup.html
+status-redesign-mockup.png
