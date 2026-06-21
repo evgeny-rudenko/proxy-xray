@@ -18,11 +18,6 @@ ASSETS = {
         "url": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
         "min_size": 1_000_000,
     },
-    "iran": {
-        "filename": "iran.dat",
-        "url": None,
-        "min_size": 1,
-    },
 }
 BUNDLED_ASSET_DIR = "/usr/local/bin"
 

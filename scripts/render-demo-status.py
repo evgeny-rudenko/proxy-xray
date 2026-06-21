@@ -104,7 +104,6 @@ def main():
                 "items": {
                     "geoip": {"status": "ok", "size": 18863677, "mtime": now - 5600, "last_success_at": now - 5600, "last_error": None},
                     "geosite": {"status": "ok", "size": 10397605, "mtime": now - 5600, "last_success_at": now - 5600, "last_error": None},
-                    "iran": {"status": "ok", "size": 3705659, "mtime": now - 86400, "last_success_at": None, "last_error": None},
                 },
             },
             "last_candidate_check": {"status": "ok", "tag": "proxy-sub-9", "latency": 0.691},
