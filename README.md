@@ -164,6 +164,12 @@ Available endpoints:
 - `/json` - machine-readable status.
 - `/logs` - recent supervisor logs.
 
+The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
+
+![proxy-xray status dashboard](docs/status-dashboard.jpg)
+
+![proxy-xray live servers](docs/status-live-servers.jpg)
+
 The dashboard shows:
 
 - health indicators;
