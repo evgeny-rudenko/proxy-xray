@@ -55,3 +55,22 @@
 - не делать запуск сервиса зависимым от доступности GitHub.
 
 Если GitHub недоступен, сервис не падает на старте.
+
+## 4. Один runtime mode и удаление legacy-частей
+
+Завершено: 2026-06-21.
+
+Проект теперь сознательно заточен под один рабочий режим: домашний LAN-шлюз с VLESS-подпиской.
+
+Реализовано:
+
+- удалены старые `proxy-*.sh` генераторы одноразовых конфигов;
+- удален `qrcode.sh`;
+- `run.sh` упрощен до entrypoint для subscription supervisor;
+- убраны старые режимы stdin/raw JSON;
+- удалены неиспользуемые runtime-зависимости: dnsmasq, proxychains, qrencode;
+- удалены build-time China dnsmasq lists и неиспользуемый `iran.dat`;
+- smoke-тест LAN VLESS теперь использует реальный UUID из `.env`;
+- проверены build, startup, status endpoint, SOCKS, HTTP, LAN VLESS, split DNS, RU direct routing и geo assets.
+
+Так код и Docker image теперь соответствуют только тому режиму, который реально используется на домашнем сервере.

@@ -24,6 +24,24 @@ After startup it should provide:
 
 ## Runtime Architecture
 
+The container now supports one runtime mode only: the subscription-based home gateway. Legacy one-shot protocol generators and QR helper scripts were removed to keep the image and entrypoint focused on the deployed setup.
+
+Removed legacy surface:
+
+- `proxy-*.sh` one-off VLESS/VMess/Trojan config generators;
+- `qrcode.sh`;
+- stdin/raw JSON config mode from the entrypoint;
+- old dnsmasq/proxychains/qrencode runtime dependencies;
+- build-time China dnsmasq lists and unused `iran.dat`.
+
+`run.sh` is now a thin entrypoint that:
+
+- parses only supervisor/gateway flags;
+- writes generated routing rules to a temporary JSON file;
+- starts direct split DNS when enabled;
+- passes the first global DNS upstream to Xray's DNS inbound;
+- exits on unknown legacy flags instead of silently pretending they are supported.
+
 The old single-file subscription supervisor was refactored into the `proxy_xray` Python package:
 
 - `proxy_xray/main.py` parses supervisor CLI flags.
@@ -38,7 +56,7 @@ The old single-file subscription supervisor was refactored into the `proxy_xray`
 - `proxy_xray/telegram.py` sends recovery notifications.
 - `proxy_xray/candidate_checker.py` checks one random candidate at a time.
 
-`subscription-supervisor.py` is now a thin compatibility wrapper that imports and runs `proxy_xray.main`.
+`subscription-supervisor.py` is now a thin wrapper that imports and runs `proxy_xray.main`.
 
 ## Subscription And Candidates
 
@@ -283,22 +301,27 @@ These files are intentionally operator-facing:
 
 `state.json` lives next to `vless-extra.txt` so the whole folder can be copied to another machine while preserving cached subscription candidates and measured state.
 
-## Deployment Direction
+## Deployment
 
-The most practical deployment option for a home server is a local one-command deploy from the operator machine over SSH:
+The project includes a local one-command deploy script for updating the home server over SSH:
 
 ```sh
-./deploy.sh home
+DEPLOY_HOST=192.168.1.10 \
+DEPLOY_USER=user \
+DEPLOY_PATH=/home/user/proxy-xray \
+scripts/deploy-server.sh
 ```
 
-Recommended behavior for a future deploy script:
+Current behavior:
 
-- rsync the project to the server;
-- preserve `state.json` and `vless-extra.txt`;
+- rsyncs the project to the server;
+- copies local `.env` and `vless-extra.txt`;
+- preserves server-side `state.json` and `assets/` by default;
+- creates missing remote runtime files/directories;
 - run `docker compose config --quiet`;
-- run `docker compose up -d --build`;
-- run the smoke-test container;
-- print status URL and key proxy ports.
+- builds the `proxy-xray` image;
+- recreates the service;
+- checks the local status endpoint on the server.
 
 This avoids exposing the home server to the public internet and avoids GitHub Actions or inbound SSH from the internet.
 

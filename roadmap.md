@@ -30,25 +30,27 @@ Risks:
 - Xray API config needs careful validation;
 - exact observatory output format needs runtime verification.
 
-## 2. One-Command SSH Deploy
+## 2. Deploy Profiles And Rollback
 
-Add a local deploy script for the home server:
+The basic SSH deploy script already exists. The next step is to make deployment safer and easier to repeat across local/server profiles.
+
+Goal:
 
 ```sh
 ./deploy.sh home
+./deploy.sh home --rollback 2026-06-21_18-00
 ```
 
 Expected behavior:
 
-- read target settings from `.deploy.env`;
-- copy project files to the server with `rsync`;
-- preserve `state.json` and `vless-extra.txt`;
-- run `docker compose config --quiet`;
-- run `docker compose up -d --build`;
-- run the smoke-test container;
-- print final status URL and proxy ports.
+- read target settings from `.deploy.env` or named profile files;
+- create a backup on the server before replacing files;
+- preserve `state.json`, `vless-extra.txt`, `.env`, and `assets/` by default;
+- optionally run the smoke-test container after deploy;
+- print final status URL and proxy ports;
+- support rollback to the previous uploaded version.
 
-This is preferred over GitHub Actions because the home server does not need to be exposed to the public internet.
+This keeps the current LAN-only deployment model, but reduces manual recovery work when an update is bad.
 
 ## 3. Backup And Restore Operator Files
 
@@ -325,7 +327,7 @@ Risk: fingerprint randomization and ClientHello fragmentation can help against s
 5. TLS fingerprint and ClientHello fragment experiments.
 6. One-click diagnostic bundle.
 7. Minimal local API for UI actions.
-8. Add `deploy.sh home`.
+8. Add deploy profiles and rollback.
 9. Add backup/restore for operator files.
 10. Read Xray observatory results through Xray API.
 11. Write `OPERATIONS.md`.

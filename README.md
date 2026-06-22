@@ -188,8 +188,8 @@ The deploy script syncs files over SSH, preserves server runtime state, rebuilds
 
 ```shell
 DEPLOY_HOST=192.168.1.10 \
-DEPLOY_USER=evgeny \
-DEPLOY_PATH=/home/evgeny/proxy-xray \
+DEPLOY_USER=user \
+DEPLOY_PATH=/home/user/proxy-xray \
 scripts/deploy-server.sh
 ```
 

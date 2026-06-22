@@ -14,8 +14,8 @@ Choose a folder on the server, then run from the local project folder:
 
 ```shell
 DEPLOY_HOST=192.168.1.10 \
-DEPLOY_USER=evgeny \
-DEPLOY_PATH=/home/evgeny/proxy-xray \
+DEPLOY_USER=user \
+DEPLOY_PATH=/home/user/proxy-xray \
 scripts/deploy-server.sh
 ```
 
@@ -27,8 +27,8 @@ By default the script copies local `.env` and `vless-extra.txt`, but does not co
 
 ```shell
 DEPLOY_HOST=192.168.1.10 \
-DEPLOY_USER=evgeny \
-DEPLOY_PATH=/home/evgeny/proxy-xray \
+DEPLOY_USER=user \
+DEPLOY_PATH=/home/user/proxy-xray \
 scripts/deploy-server.sh
 ```
 

@@ -55,3 +55,22 @@ Implemented:
 - avoid making service startup depend on GitHub availability.
 
 The service keeps working when GitHub is unavailable at startup.
+
+## 4. Single Runtime Mode And Legacy Cleanup
+
+Completed: 2026-06-21.
+
+The project is now intentionally optimized for one deployed mode: the home LAN subscription gateway.
+
+Implemented:
+
+- removed legacy `proxy-*.sh` one-shot protocol generators;
+- removed `qrcode.sh`;
+- simplified `run.sh` into a subscription-supervisor entrypoint;
+- removed old stdin/raw JSON entrypoint paths;
+- removed unused runtime dependencies such as dnsmasq, proxychains, and qrencode;
+- removed build-time China dnsmasq lists and unused `iran.dat`;
+- updated smoke tests so LAN VLESS uses the real configured UUID from `.env`;
+- validated build, startup, status endpoint, SOCKS, HTTP, LAN VLESS, split DNS, RU direct routing, and geo assets.
+
+This reduces the image and code surface to the only mode actually used on the home server.

@@ -30,25 +30,27 @@
 - нужно аккуратно настроить Xray API;
 - формат данных observatory нужно проверить на реальном контейнере.
 
-## 2. Deploy одной командой по SSH
+## 2. Deploy profiles и rollback
 
-Добавить локальный deploy-скрипт для домашнего сервера:
+Базовый SSH deploy-скрипт уже есть. Следующий шаг - сделать обновления безопаснее и удобнее для повторения через локальные/server profiles.
+
+Цель:
 
 ```sh
 ./deploy.sh home
+./deploy.sh home --rollback 2026-06-21_18-00
 ```
 
 Ожидаемое поведение:
 
-- читать настройки сервера из `.deploy.env`;
-- копировать проект на сервер через `rsync`;
-- не затирать `state.json` и `vless-extra.txt`;
-- запускать `docker compose config --quiet`;
-- запускать `docker compose up -d --build`;
-- прогонять smoke-тест;
-- печатать итоговый URL статуса и порты прокси.
+- читать настройки сервера из `.deploy.env` или named profile files;
+- создавать backup на сервере перед заменой файлов;
+- по умолчанию не затирать `state.json`, `vless-extra.txt`, `.env` и `assets/`;
+- опционально прогонять smoke-тест после deploy;
+- печатать итоговый URL статуса и порты прокси;
+- поддержать rollback на предыдущую загруженную версию.
 
-Такой вариант лучше GitHub Actions, потому что домашний сервер не нужно открывать в интернет.
+Так мы сохраняем текущую LAN-only модель deploy, но уменьшаем ручное восстановление, если обновление оказалось неудачным.
 
 ## 3. Backup и restore операторских файлов
 
@@ -325,7 +327,7 @@ backups/
 5. Эксперименты с TLS fingerprint и ClientHello fragment.
 6. Diagnostic bundle одной кнопкой.
 7. Минимальный local API для UI actions.
-8. Добавить `deploy.sh home`.
+8. Добавить deploy profiles и rollback.
 9. Добавить backup/restore операторских файлов.
 10. Читать Xray observatory results через Xray API.
 11. Написать `OPERATIONS.md`.
