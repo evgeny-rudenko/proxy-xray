@@ -2,15 +2,17 @@ FROM golang:1.26-alpine3.23 AS builder
 
 ARG XRAY_VER='v26.6.1'
 
-RUN apk add --no-cache bash git build-base curl
+RUN apk add --no-cache bash git curl
 
 WORKDIR /go/src/XTLS/Xray-core
 RUN git clone https://github.com/XTLS/Xray-core.git . && \
     git checkout ${XRAY_VER} && \
-    go build -o xray -trimpath -ldflags "-s -w -buildid=" ./main
+    CGO_ENABLED=0 go build -o xray -trimpath -ldflags "-s -w -buildid=" ./main
 
-RUN curl -sSLO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
-RUN curl -sSLO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+RUN curl -fsSLo geoip.dat --retry 3 --retry-all-errors --connect-timeout 10 --max-time 180 \
+    https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat || touch geoip.dat
+RUN curl -fsSLo geosite.dat --retry 3 --retry-all-errors --connect-timeout 10 --max-time 180 \
+    https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat || touch geosite.dat
 
 
 FROM alpine:3.23

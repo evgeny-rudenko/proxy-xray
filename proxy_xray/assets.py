@@ -75,7 +75,8 @@ def prepare_assets(args):
     for item in ASSETS.values():
         target = asset_file_path(args, item)
         bundled = os.path.join(BUNDLED_ASSET_DIR, item["filename"])
-        if not os.path.exists(target) and os.path.exists(bundled):
+        bundled_ok = os.path.exists(bundled) and os.path.getsize(bundled) >= item["min_size"]
+        if not os.path.exists(target) and bundled_ok:
             shutil.copy2(bundled, target)
             log(f"seeded asset {item['filename']} from image")
     os.environ["XRAY_LOCATION_ASSET"] = args.asset_dir

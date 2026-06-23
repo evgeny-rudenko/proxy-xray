@@ -323,6 +323,12 @@ def candidate_is_live(candidate):
     )
 
 
+def candidate_is_preferred_region(candidate):
+    if candidate.get("source") == "extra":
+        return True
+    return int(candidate.get("region_score", 2)) < 2
+
+
 def clamp(value, minimum=0.0, maximum=1.0):
     return max(minimum, min(maximum, value))
 
@@ -348,6 +354,9 @@ def candidate_fallback_score(candidate, now=None):
     if region_bonus:
         score += region_bonus
         reasons.append(f"+{region_bonus} preferred-region")
+    elif candidate.get("source") != "extra":
+        score -= 140
+        reasons.append("-140 non-preferred-region")
 
     network_bonus = max(0, 9 - int(candidate.get("network_score", 9))) * 4
     if network_bonus:
@@ -453,23 +462,34 @@ def candidate_is_quarantined(candidate, now=None):
 
 def primary_candidate(candidates):
     ordered = native_candidate_order(candidates)
-    return ordered[0] if ordered else None
+    for preferred_only in (True, False):
+        for candidate in ordered:
+            if preferred_only and not candidate_is_preferred_region(candidate):
+                continue
+            if candidate_is_quarantined(candidate):
+                continue
+            return candidate
+    return None
 
 
 def standby_candidate(candidates, primary=None, max_age=600, now=None):
     now = now or time.time()
     primary_uri = primary.get("uri") if primary else None
-    for candidate in native_candidate_order(candidates):
-        if primary_uri and candidate.get("uri") == primary_uri:
-            continue
-        if candidate_is_quarantined(candidate, now):
-            continue
-        if not candidate_is_live(candidate):
-            continue
-        last_ok_at = candidate.get("last_ok_at")
-        if max_age > 0 and last_ok_at and now - float(last_ok_at) > max_age:
-            continue
-        return candidate
+    ordered = native_candidate_order(candidates)
+    for preferred_only in (True, False):
+        for candidate in ordered:
+            if preferred_only and not candidate_is_preferred_region(candidate):
+                continue
+            if primary_uri and candidate.get("uri") == primary_uri:
+                continue
+            if candidate_is_quarantined(candidate, now):
+                continue
+            if not candidate_is_live(candidate):
+                continue
+            last_ok_at = candidate.get("last_ok_at")
+            if max_age > 0 and last_ok_at and now - float(last_ok_at) > max_age:
+                continue
+            return candidate
     return None
 
 

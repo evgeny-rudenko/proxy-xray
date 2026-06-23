@@ -228,7 +228,7 @@ import time
 
 sys.path.insert(0, "/")
 from proxy_xray.candidate_checker import weighted_choice
-from proxy_xray.vless import native_candidate_order, quarantine_candidate, standby_candidate
+from proxy_xray.vless import native_candidate_order, primary_candidate, quarantine_candidate, standby_candidate
 
 now = time.time()
 random.seed(1)
@@ -259,9 +259,27 @@ live_sub = {
     "last_ok_at": now - 60,
     "last_fail_at": None,
 }
+nonpreferred_sub = {
+    "index": 2,
+    "uri": "nonpreferred",
+    "name": "Nigeria",
+    "host": "nigeria.example",
+    "port": 443,
+    "source": "subscription",
+    "source_score": 1,
+    "region_score": 2,
+    "network_score": 0,
+    "last_latency": 0.3,
+    "last_ok_at": now - 10,
+    "last_fail_at": None,
+}
 ordered = native_candidate_order([failed_extra, live_sub])
 assert ordered[0]["uri"] == "sub", ordered
 assert ordered[0]["fallback_score"] > ordered[1]["fallback_score"]
+ordered = native_candidate_order([live_sub, nonpreferred_sub])
+assert ordered[0]["uri"] == "sub", ordered
+assert "non-preferred-region" in " ".join(nonpreferred_sub["fallback_score_reasons"])
+assert primary_candidate([nonpreferred_sub, live_sub])["uri"] == "sub"
 quarantine_candidate(live_sub, 900, "test quarantine", now=now)
 ordered = native_candidate_order([failed_extra, live_sub])
 assert ordered[0]["uri"] == "extra", ordered
@@ -269,6 +287,9 @@ live_sub["last_fail_at"] = None
 live_sub["last_ok_at"] = now - 60
 live_sub["quarantine_until"] = None
 live_sub["quarantine_reason"] = None
+live_sub["last_ok_at"] = now - 500
+assert standby_candidate([failed_extra, live_sub, nonpreferred_sub], primary=failed_extra, max_age=600, now=now)["uri"] == "sub"
+live_sub["last_ok_at"] = now - 60
 assert standby_candidate([failed_extra, live_sub], primary=failed_extra, max_age=600, now=now)["uri"] == "sub"
 weighted = [weighted_choice([failed_extra, live_sub], type("Args", (), {"candidate_check_extra_weight": 5})())["uri"] for _ in range(200)]
 assert weighted.count("extra") > weighted.count("sub"), weighted

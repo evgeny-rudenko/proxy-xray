@@ -12,6 +12,7 @@ from .telegram import native_recovery_message, send_telegram_notification
 from .util import load_json_file
 from .vless import (
     candidate_is_quarantined,
+    candidate_is_preferred_region,
     clear_expired_quarantine,
     native_candidate_order,
     primary_candidate,
@@ -97,12 +98,16 @@ def select_standby_candidate(candidates, active_candidate, args):
     if standby:
         return standby, "last-known-good standby"
     active_uri = active_candidate.get("uri") if active_candidate else None
-    for candidate in native_candidate_order(candidates):
-        if candidate.get("uri") == active_uri:
-            continue
-        if candidate_is_quarantined(candidate):
-            continue
-        return candidate, "cold standby"
+    ordered = native_candidate_order(candidates)
+    for preferred_only in (True, False):
+        for candidate in ordered:
+            if preferred_only and not candidate_is_preferred_region(candidate):
+                continue
+            if candidate.get("uri") == active_uri:
+                continue
+            if candidate_is_quarantined(candidate):
+                continue
+            return candidate, "cold standby"
     return None, "none"
 
 

@@ -67,6 +67,8 @@ The compose file runs subscription mode using a configured subscription URL. The
 - excludes Russian subscription candidates by name/host markers;
 - keeps local extra links even if they look Russian, because they are operator-controlled;
 - prefers US and European subscription servers;
+- selects local/US/EU candidates first for both primary and hot standby slots;
+- keeps non-preferred subscription regions as fallback only when no preferred usable candidate is available;
 - caches filtered subscription candidates in `state.json`;
 - can start from cached candidates if the subscription URL is temporarily unavailable;
 - can retry a failed startup subscription refresh through the already-running local SOCKS proxy.
@@ -98,7 +100,7 @@ Instead of selecting one outbound in Python, the generated Xray config now conta
 
 Candidates with a recent successful per-candidate check are sorted first. This makes the native fallback prefer a known live server after Xray restart/failover while observatory probes catch up.
 
-Fallback order is now score-based instead of a simple "last OK first" sort. The score keeps local extra servers preferred by default, but a recently working subscription server can outrank a recently failed extra server. The score also penalizes recent failures, high latency, and stale successful checks while keeping smaller bonuses for preferred regions, transport type, and measured throughput. The generated Xray config still receives one ordered candidate list; the score is only used to decide that order.
+Fallback order is now score-based instead of a simple "last OK first" sort. The score keeps local extra servers preferred by default, but a recently working subscription server can outrank a recently failed extra server. The score also penalizes recent failures, high latency, stale successful checks, and non-preferred subscription regions while keeping smaller bonuses for preferred regions, transport type, and measured throughput. The generated Xray config still receives one ordered candidate list; the score is only used to decide that order.
 
 ## Active Path Health And Degradation Checks
 
