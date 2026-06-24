@@ -273,11 +273,25 @@ def score_bar(candidate):
         score_text = format_metric(score)
         width = max(0, min(100, int(score_num)))
     return (
+        '<div class="score-stack">'
         '<div class="score">'
         f"<strong>{html.escape(score_text)}</strong>"
         f'<div class="score-bar"><span style="width: {width}%"></span></div>'
         "</div>"
+        f'<div class="score-reasons">{html.escape(score_reasons(candidate, limit=6))}</div>'
+        "</div>"
     )
+
+
+def score_value(candidate):
+    return format_metric(candidate.get("fallback_score")) if candidate.get("fallback_score") is not None else "-"
+
+
+def score_reasons(candidate, limit=2):
+    reasons = candidate.get("fallback_score_reasons") or []
+    if not reasons:
+        return "no score reasons"
+    return ", ".join(str(reason) for reason in reasons[:limit])
 
 
 def modern_server_rows(candidates):
@@ -395,7 +409,7 @@ def render_status_html():
     .icon-button, .text-button, .button-link {{ height: 34px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.8); color: #273545; border-radius: 8px; font: inherit; font-size: 13px; text-decoration: none; display: inline-grid; place-items: center; }}
     .icon-button {{ width: 34px; font-weight: 800; }}
     .text-button, .button-link {{ padding: 0 12px; }}
-    .hero {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr); gap: 14px; margin-bottom: 14px; }}
+    .hero {{ display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr); gap: 14px; margin-bottom: 14px; }}
     .system-card, .connection-card, .panel {{ background: rgba(255, 255, 255, 0.92); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }}
     .system-card {{ padding: 18px; display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; }}
     .status-ring {{ width: 104px; height: 104px; border-radius: 50%; display: grid; place-items: center; position: relative; }}
@@ -408,7 +422,7 @@ def render_status_html():
     .status-ring strong {{ font-size: 22px; line-height: 1; }}
     .status-ring span {{ color: var(--muted); font-size: 12px; margin-top: 3px; }}
     .system-copy p {{ margin: 8px 0 0; color: var(--muted); font-size: 14px; max-width: 760px; }}
-    .metric-strip {{ display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 8px; margin-top: 16px; }}
+    .metric-strip {{ display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; margin-top: 16px; }}
     .mini-metric, .info-box {{ border: 1px solid var(--line); background: var(--panel-soft); border-radius: 8px; padding: 10px; min-height: 70px; }}
     .label {{ color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 750; line-height: 1.2; }}
     .metric-value {{ margin-top: 6px; font-size: 20px; line-height: 1.1; font-weight: 750; overflow-wrap: anywhere; }}
@@ -456,9 +470,11 @@ def render_status_html():
     .tab {{ height: 28px; padding: 0 10px; border-radius: 6px; color: #536273; font-size: 12px; font-weight: 700; text-decoration: none; display: inline-grid; place-items: center; }}
     .tab.active {{ color: #182331; background: #fff; box-shadow: 0 1px 4px rgba(22, 36, 51, 0.12); }}
     .table-footer {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 10px; }}
-    .score {{ display: flex; align-items: center; gap: 8px; min-width: 130px; }}
+    .score-stack {{ min-width: 210px; max-width: 360px; }}
+    .score {{ display: flex; align-items: center; gap: 8px; }}
     .score-bar {{ flex: 1; height: 7px; border-radius: 999px; background: #dce4eb; overflow: hidden; }}
     .score-bar span {{ display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), #4b9e8a); }}
+    .score-reasons {{ margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.35; }}
     .logs {{ margin: 0; min-height: 332px; height: calc(100% - 70px); overflow: auto; border-radius: 8px; background: #101820; color: #dbe4ed; padding: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }}
     @media (max-width: 980px) {{
       main {{ width: min(100% - 24px, 1480px); }}
@@ -502,6 +518,8 @@ def render_status_html():
           <div class="mini-metric"><div class="label">Tested live</div><div class="metric-value">{len(tested_live)}</div><div class="metric-note">ready for fallback</div></div>
           <div class="mini-metric"><div class="label">Throughput</div><div class="metric-value">{html.escape(throughput_text(last_throughput.get('kbps')))}</div><div class="metric-note">active path</div></div>
           <div class="mini-metric"><div class="label">Next test</div><div class="metric-value">{html.escape(short_time(snapshot.get('next_candidate_check_at')))}</div><div class="metric-note">random jitter</div></div>
+          <div class="mini-metric"><div class="label">Subscription</div><div class="metric-value">{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</div><div class="metric-note">last success</div></div>
+          <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{html.escape(seconds_left(snapshot.get('switch_cooldown_until')))}</div><div class="metric-note">quarantine {snapshot.get('quarantine_count', 0)}</div></div>
         </div>
       </div>
     </div>
@@ -518,10 +536,10 @@ def render_status_html():
         <span class="chip {hot_chip_class}">hot {html.escape(str(hot_standby_candidate.get('tag') or '-'))}</span>
       </div>
       <div class="connection-grid">
+        <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>
         <div class="mini-metric"><div class="label">Latency</div><div class="metric-value">{html.escape(format_metric(current.get('last_latency'), 's'))}</div><div class="metric-note">last OK</div></div>
-        <div class="mini-metric"><div class="label">Subscription</div><div class="metric-value">{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</div><div class="metric-note">last success</div></div>
         <div class="mini-metric"><div class="label">Hot standby</div><div class="metric-value">{html.escape(str(hot_standby_candidate.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
-        <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{html.escape(seconds_left(snapshot.get('switch_cooldown_until')))}</div><div class="metric-note">quarantine {snapshot.get('quarantine_count', 0)}</div></div>
+        <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(hot_standby_candidate))}</div><div class="metric-note">{html.escape(score_reasons(hot_standby_candidate))}</div></div>
       </div>
     </aside>
   </section>
@@ -605,9 +623,11 @@ def render_servers_html(kind):
     th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #e9eef2; font-size: 13px; vertical-align: top; }}
     th {{ color: #51606f; background: #f4f7f9; font-size: 11px; text-transform: uppercase; font-weight: 800; }}
     .metric-note {{ color: #61707f; font-size: 12px; }}
-    .score {{ display: flex; align-items: center; gap: 8px; min-width: 130px; }}
+    .score-stack {{ min-width: 210px; max-width: 360px; }}
+    .score {{ display: flex; align-items: center; gap: 8px; }}
     .score-bar {{ flex: 1; height: 7px; border-radius: 999px; background: #dce4eb; overflow: hidden; }}
     .score-bar span {{ display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #168052, #4b9e8a); }}
+    .score-reasons {{ margin-top: 5px; color: #61707f; font-size: 12px; line-height: 1.35; }}
   </style>
 </head>
 <body>
