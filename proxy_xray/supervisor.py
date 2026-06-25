@@ -4,6 +4,7 @@ import time
 from .assets import prepare_assets, refresh_assets, set_asset_status
 from .candidate_checker import candidate_check_enabled, random_check_delay, run_random_candidate_check
 from .health import build_health_checks
+from .pool import select_active_pool, select_standby_pool
 from .state import load_state, persist_state
 from .status import log, public_candidate, set_status, status_candidate_fields, status_snapshot
 from .subscription import load_candidates
@@ -227,10 +228,24 @@ def active_path_for_slot(slot):
 
 
 def set_runtime_status(candidates, args, active_slot, standby_slot):
+    active_pool = select_active_pool(
+        candidates,
+        active_candidate=active_slot.get("candidate"),
+        size=getattr(args, "active_pool_size", 1),
+    )
+    standby_pool = select_standby_pool(
+        candidates,
+        active_pool=active_pool,
+        standby_candidate=standby_slot.get("candidate"),
+        size=getattr(args, "standby_pool_size", 1),
+        max_age=args.standby_max_age,
+    )
     set_status(
         **status_candidate_fields(candidates, args.standby_max_age),
         xray_running=slot_alive(active_slot),
+        active_pool=[public_candidate(candidate) for candidate in active_pool],
         active_backend=slot_public_status(active_slot),
+        standby_pool=[public_candidate(candidate) for candidate in standby_pool],
         hot_standby=slot_public_status(standby_slot),
         active_path=active_path_for_slot(active_slot),
     )
