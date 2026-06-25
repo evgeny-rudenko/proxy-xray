@@ -49,6 +49,8 @@ usage() {
     echo "    --candidate-check-max-interval <s>    Maximum random candidate check delay"
     echo "    --candidate-check-timeout <seconds>   Per-candidate health-check timeout"
     echo "    --candidate-check-extra-weight <n>    Extra-list candidate check weight"
+    echo "    --diagnostic-url <url>                URL probed by /diagnostics"
+    echo "    --diagnostic-probe-timeout <seconds>  Per-diagnostic probe timeout"
     echo "    --active-path-interval <seconds>      Xray balancer status refresh interval"
     echo "    --asset-dir <path>                    Persistent geo asset directory"
     echo "    --asset-refresh-interval <seconds>    LoyalSoldier geo asset refresh interval"
@@ -157,6 +159,8 @@ CANDIDATE_CHECK_MIN_INTERVAL=""
 CANDIDATE_CHECK_MAX_INTERVAL=""
 CANDIDATE_CHECK_TIMEOUT=""
 CANDIDATE_CHECK_EXTRA_WEIGHT=""
+DIAGNOSTIC_URLS=()
+DIAGNOSTIC_PROBE_TIMEOUT=""
 ACTIVE_PATH_INTERVAL=""
 ASSET_DIR=""
 ASSET_REFRESH_INTERVAL=""
@@ -323,6 +327,12 @@ while [ $# -gt 0 ]; do
         --candidate-check-extra-weight)
             need_value "$@"; CANDIDATE_CHECK_EXTRA_WEIGHT="$2"; shift 2
             ;;
+        --diagnostic-url)
+            need_value "$@"; DIAGNOSTIC_URLS+=("$2"); shift 2
+            ;;
+        --diagnostic-probe-timeout)
+            need_value "$@"; DIAGNOSTIC_PROBE_TIMEOUT="$2"; shift 2
+            ;;
         --active-path-interval)
             need_value "$@"; ACTIVE_PATH_INTERVAL="$2"; shift 2
             ;;
@@ -458,6 +468,10 @@ append_arg "${CANDIDATE_CHECK_MIN_INTERVAL}" --candidate-check-min-interval
 append_arg "${CANDIDATE_CHECK_MAX_INTERVAL}" --candidate-check-max-interval
 append_arg "${CANDIDATE_CHECK_TIMEOUT}" --candidate-check-timeout
 append_arg "${CANDIDATE_CHECK_EXTRA_WEIGHT}" --candidate-check-extra-weight
+for diagnostic_url in "${DIAGNOSTIC_URLS[@]}"; do
+    SUPERVISOR_ARGS+=(--diagnostic-url "${diagnostic_url}")
+done
+append_arg "${DIAGNOSTIC_PROBE_TIMEOUT}" --diagnostic-probe-timeout
 append_arg "${ACTIVE_PATH_INTERVAL}" --active-path-interval
 append_arg "${ASSET_DIR}" --asset-dir
 append_arg "${ASSET_REFRESH_INTERVAL}" --asset-refresh-interval

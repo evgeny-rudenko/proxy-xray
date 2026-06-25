@@ -102,6 +102,15 @@ echo "${status_json}" | jq -e '.active_observatory == null or (.active_observato
     || fail "active_observatory status is invalid"
 echo "${status_json}" | jq -e '.standby_observatory == null or (.standby_observatory.api_port | type == "number" and (.standby_observatory.status | type == "string"))' >/dev/null \
     || fail "standby_observatory status is invalid"
+diagnostics_json="$(curl -fsS "http://127.0.0.1:${STATUS_PORT}/diagnostics.json")" \
+    || fail "diagnostics endpoint failed"
+echo "${diagnostics_json}" | jq -e '.probes | type == "array" and length >= 1' >/dev/null \
+    || fail "diagnostics probes are missing"
+echo "${diagnostics_json}" | jq -e '.summary.failover_state.state | type == "string"' >/dev/null \
+    || fail "diagnostics failover state is missing"
+if echo "${diagnostics_json}" | grep -E 'vless://|[0-9]{6,}:[A-Za-z0-9_-]{20,}|/sub/[A-Za-z0-9_-]+' >/dev/null; then
+    fail "diagnostics output contains sensitive-looking data"
+fi
 echo "${status_json}" | jq -e '.assets.items.geoip.status == "ok" and .assets.items.geosite.status == "ok"' >/dev/null \
     || fail "geo assets status is not ok"
 echo "${status_json}" | jq -e '.assets.items.geoip.size > 1000000 and .assets.items.geosite.size > 1000000' >/dev/null \

@@ -87,6 +87,14 @@ services:
       - "10"
       - --candidate-check-extra-weight
       - "5"
+      - --diagnostic-url
+      - "https://www.gstatic.com/generate_204"
+      - --diagnostic-url
+      - "https://speed.cloudflare.com/__down?bytes=512000"
+      - --diagnostic-url
+      - "https://pikabu.ru/"
+      - --diagnostic-probe-timeout
+      - "6"
       - --active-path-interval
       - "15"
       - --asset-dir

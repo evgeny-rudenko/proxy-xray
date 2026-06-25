@@ -56,6 +56,8 @@ def build_parser():
     parser.add_argument("--candidate-check-start-delay", type=float, default=0.7)
     parser.add_argument("--candidate-check-extra-weight", type=int, default=5)
     parser.add_argument("--diagnostics-timeout", type=int, default=4)
+    parser.add_argument("--diagnostic-url", action="append", default=[])
+    parser.add_argument("--diagnostic-probe-timeout", type=int, default=6)
     parser.add_argument("--active-path-interval", type=int, default=15)
     parser.add_argument("--asset-dir", default="/opt/proxy-xray/assets")
     parser.add_argument("--asset-refresh-interval", type=int, default=86400)

@@ -817,6 +817,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 8. Diagnostics и domain probes
 
+Статус: частично реализовано. Добавлены `/diagnostics` и `/diagnostics.json`: direct/SOCKS/HTTP URL probes, DNS probes, sanitization чувствительных значений и smoke-проверка отсутствия secret-looking данных. Отдельный downloadable bundle можно добавить следующим шагом при необходимости.
+
 Цель: быстрее разбирать проблемы вроде неполной загрузки картинок.
 
 Работы:

@@ -264,6 +264,8 @@ Endpoints:
 
 - `/` shows HTML status;
 - `/json` returns status JSON;
+- `/diagnostics` runs live direct/SOCKS/HTTP URL probes and DNS probes;
+- `/diagnostics.json` returns the same sanitized diagnostics in machine-readable form;
 - `/logs` returns recent supervisor logs.
 
 The HTML page currently shows:
@@ -283,6 +285,8 @@ The HTML page currently shows:
 - tested live servers;
 - logs;
 - all candidates at the bottom.
+
+Diagnostic URLs are configured with repeated `--diagnostic-url` flags. Compose includes `generate_204`, Cloudflare 512 KB, and `https://pikabu.ru/`. Diagnostic output is redacted for VLESS URIs, subscription URLs, Telegram-looking tokens, and UUIDs.
 
 ## Test Container
 

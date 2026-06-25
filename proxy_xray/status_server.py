@@ -7,7 +7,11 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .diagnostics import build_diagnostics
 from .status import LOG_BUFFER, log, status_snapshot
+
+
+STATUS_ARGS = None
 
 
 def status_timezone():
@@ -316,6 +320,105 @@ def modern_server_rows(candidates):
     return "".join(rows)
 
 
+def probe_status_class(item):
+    return status_class((item or {}).get("status"))
+
+
+def diagnostic_probe_rows(probes):
+    rows = []
+    for probe in probes:
+        for path_name in ("direct", "socks", "http"):
+            item = probe.get(path_name) or {}
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(probe.get('url') or '-'))}</td>"
+                f"<td>{html.escape(path_name)}</td>"
+                f'<td><span class="pill {probe_status_class(item)}">{html.escape(str(item.get("status") or "-"))}</span></td>'
+                f"<td>{html.escape(str(item.get('detail') or '-'))}</td>"
+                f"<td>{html.escape(format_metric(item.get('latency'), 's'))}</td>"
+                "</tr>"
+            )
+    if not rows:
+        rows.append('<tr><td colspan="5">No diagnostic probes configured.</td></tr>')
+    return "".join(rows)
+
+
+def dns_diagnostic_rows(dns):
+    rows = []
+    for name, item in (dns or {}).items():
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(name))}</td>"
+            f'<td><span class="pill {probe_status_class(item)}">{html.escape(str(item.get("status") or "-"))}</span></td>'
+            f"<td>{html.escape(str(item.get('detail') or '-'))}</td>"
+            f"<td>{html.escape(format_metric(item.get('latency'), 's'))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append('<tr><td colspan="4">No DNS diagnostics.</td></tr>')
+    return "".join(rows)
+
+
+def render_diagnostics_html(args):
+    data = build_diagnostics(args)
+    summary = data.get("summary") or {}
+    active = data.get("active") or {}
+    standby = data.get("standby") or {}
+    failover = summary.get("failover_state") or {}
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>proxy-xray diagnostics</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f7f9; color: #17202a; }}
+    main {{ max-width: 1280px; margin: 0 auto; padding: 22px; }}
+    h1 {{ margin: 0; font-size: 24px; }}
+    h2 {{ margin: 24px 0 10px; font-size: 18px; }}
+    .topbar {{ display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; }}
+    .muted {{ color: #657386; font-size: 13px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 14px; }}
+    .box {{ background: #fff; border: 1px solid #d9e0e7; border-radius: 8px; padding: 12px; }}
+    .label {{ color: #657386; font-size: 11px; text-transform: uppercase; font-weight: 750; }}
+    .value {{ margin-top: 5px; font-size: 16px; overflow-wrap: anywhere; }}
+    .table-wrap {{ overflow-x: auto; background: #fff; border: 1px solid #d9e0e7; border-radius: 8px; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
+    th, td {{ text-align: left; padding: 9px 10px; border-bottom: 1px solid #edf1f4; font-size: 13px; vertical-align: top; }}
+    th {{ background: #f0f4f7; color: #4f5f70; text-transform: uppercase; font-size: 11px; }}
+    tr:last-child td {{ border-bottom: 0; }}
+    .pill {{ display: inline-block; border: 1px solid #d4dbe2; border-radius: 999px; padding: 2px 8px; font-size: 12px; }}
+    .pill.ok {{ color: #17633a; border-color: #b9dfca; background: #effaf3; }}
+    .pill.warn {{ color: #7a4b00; border-color: #f1d39b; background: #fff7e6; }}
+    .pill.fail {{ color: #8c1d18; border-color: #efb4ae; background: #fff0ee; }}
+    a {{ color: #005ea8; }}
+  </style>
+</head>
+<body>
+<main>
+  <div class="topbar">
+    <div>
+      <h1>proxy-xray diagnostics</h1>
+      <div class="muted">{html.escape(timezone_label())} · generated {html.escape(format_time(data.get('generated_at')))}</div>
+    </div>
+    <div class="muted"><a href="/">status</a> · <a href="/diagnostics.json">json</a></div>
+  </div>
+  <section class="grid">
+    <div class="box"><div class="label">Failover</div><div class="value">{html.escape(str(failover.get('state') or '-'))}<br>{html.escape(str(failover.get('reason') or failover.get('kind') or '-'))}</div></div>
+    <div class="box"><div class="label">Active</div><div class="value">{html.escape(str(active.get('slot') or '-'))}<br>{html.escape(str((active.get('selected') or {}).get('tag') or active.get('selected_tag') or '-'))}</div></div>
+    <div class="box"><div class="label">Standby</div><div class="value">{html.escape(str(standby.get('slot') or '-'))}<br>{html.escape(str((standby.get('selected') or {}).get('tag') or '-'))}</div></div>
+    <div class="box"><div class="label">Health</div><div class="value">{html.escape(str((summary.get('last_health') or {}).get('status') or '-'))}</div></div>
+  </section>
+  <h2>URL probes</h2>
+  <div class="table-wrap"><table><thead><tr><th>URL</th><th>Path</th><th>Status</th><th>Detail</th><th>Latency</th></tr></thead><tbody>{diagnostic_probe_rows(data.get('probes') or [])}</tbody></table></div>
+  <h2>DNS probes</h2>
+  <div class="table-wrap"><table><thead><tr><th>Name</th><th>Status</th><th>Detail</th><th>Latency</th></tr></thead><tbody>{dns_diagnostic_rows(data.get('dns') or {})}</tbody></table></div>
+</main>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
 def render_status_html():
     snapshot = status_snapshot()
     fallback = snapshot.get("fallback") or {}
@@ -511,6 +614,7 @@ def render_status_html():
       <a class="icon-button" href="/" title="Refresh">R</a>
       <a class="icon-button" href="/json" title="Open JSON">J</a>
       <a class="icon-button" href="/logs" title="Open logs">L</a>
+      <a class="icon-button" href="/diagnostics" title="Diagnostics">D</a>
       <a class="button-link" href="/legacy">Old version</a>
     </div>
   </header>
@@ -742,7 +846,7 @@ def render_legacy_status_html():
       <h1>proxy-xray status</h1>
       <div class="muted">Auto-refresh every 15 seconds · {html.escape(timezone_label())}</div>
     </div>
-    <div class="links"><a href="/json">JSON</a> · <a href="/logs">Plain logs</a></div>
+    <div class="links"><a href="/json">JSON</a> · <a href="/diagnostics">Diagnostics</a> · <a href="/logs">Plain logs</a></div>
   </div>
   <h2>Overview</h2>
   <div class="grid">
@@ -805,8 +909,16 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        args = STATUS_ARGS
         if self.path in ("/", "/status"):
             self.send_bytes(render_status_html(), "text/html; charset=utf-8")
+            return
+        if self.path == "/diagnostics":
+            self.send_bytes(render_diagnostics_html(args), "text/html; charset=utf-8")
+            return
+        if self.path == "/diagnostics.json":
+            data = json.dumps(build_diagnostics(args), ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_bytes(data, "application/json; charset=utf-8")
             return
         if self.path == "/legacy":
             self.send_bytes(render_legacy_status_html(), "text/html; charset=utf-8")
@@ -830,6 +942,8 @@ class StatusHandler(BaseHTTPRequestHandler):
 
 
 def start_status_server(args):
+    global STATUS_ARGS
+    STATUS_ARGS = args
     if args.status_port <= 0:
         return None
     server = ThreadingHTTPServer((args.status_listen, args.status_port), StatusHandler)

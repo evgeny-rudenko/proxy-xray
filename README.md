@@ -187,6 +187,8 @@ Available endpoints:
 - `/servers/live` - tested live servers.
 - `/servers/all` - all candidates.
 - `/json` - machine-readable status.
+- `/diagnostics` - live direct/SOCKS/HTTP URL probes and DNS probes.
+- `/diagnostics.json` - machine-readable sanitized diagnostic output.
 - `/logs` - recent supervisor logs.
 
 The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
@@ -206,6 +208,7 @@ The dashboard shows:
 - throughput;
 - subscription state;
 - geo asset state;
+- diagnostic probe entry point;
 - recent logs.
 
 ## Deploy To A Home Server
