@@ -82,6 +82,8 @@ echo "${status_json}" | jq -e '.standby_policy.max_age == 600 and .standby_polic
     || fail "standby policy is not 600/180/900"
 echo "${status_json}" | jq -e '.quarantine_count | type == "number"' >/dev/null \
     || fail "quarantine_count is missing"
+echo "${status_json}" | jq -e '.failover_state.state | type == "string"' >/dev/null \
+    || fail "failover_state is missing"
 echo "${status_json}" | jq -e '.standby == null or (.standby.tag | type == "string")' >/dev/null \
     || fail "standby status is invalid"
 echo "${status_json}" | jq -e '.active_backend.running == true and (.active_backend.candidate.tag | type == "string")' >/dev/null \

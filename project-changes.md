@@ -346,6 +346,12 @@ Current behavior:
 
 This avoids exposing the home server to the public internet and avoids GitHub Actions or inbound SSH from the internet.
 
+## Failover Decision State
+
+- Failover trigger selection moved into `proxy_xray/failover.py` and is covered by unit tests.
+- `/json` and the status UI expose `failover_state` with state, kind, reason, cooldown, counters, and standby readiness.
+- Runtime slot switching still lives in `supervisor.py`; this keeps behavior stable while making the decision layer testable.
+
 ## Known Limitations
 
 - Xray balancer information is read through the local RoutingService API for both active and standby slots.

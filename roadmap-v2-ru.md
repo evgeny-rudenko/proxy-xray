@@ -767,6 +767,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 6. Failover state machine
 
+Статус: частично реализовано. Decision layer вынесен в `proxy_xray/failover.py`: причины failover, full-failure bypass cooldown и cooldown suppression теперь считаются чистыми функциями и покрыты unit-тестами. Supervisor публикует `failover_state` в `/json` и UI. Реальное исполнение switch/rebuild slot пока остается в `supervisor.py`.
+
 Цель: сделать переключения предсказуемыми и тестируемыми.
 
 Работы:

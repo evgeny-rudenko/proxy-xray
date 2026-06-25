@@ -328,6 +328,7 @@ def render_status_html():
     active_selected = active_path.get("selected") or {}
     standby_selected = standby_observatory.get("selected") or {}
     last_throughput = snapshot.get("last_throughput") or {}
+    failover = snapshot.get("failover_state") or {}
     sources = snapshot.get("sources") or {}
     tested_live = snapshot.get("tested_live_candidates") or []
     health_checks = snapshot.get("health_checks") or {}
@@ -347,6 +348,7 @@ def render_status_html():
     xray_chip_text = "running" if active_backend.get("running", snapshot.get("xray_running")) else "stopped"
     hot_chip_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
     api_chip_class = "ok" if active_path.get("status") == "ok" else "warn"
+    failover_note = failover.get("reason") or f"cooldown {failover.get('cooldown_remaining', 0)}s"
     if counts.get("fail", 0):
         ring_class = "fail"
         ring_value = counts.get("fail", 0)
@@ -525,7 +527,7 @@ def render_status_html():
           <div class="mini-metric"><div class="label">Throughput</div><div class="metric-value">{html.escape(throughput_text(last_throughput.get('kbps')))}</div><div class="metric-note">active path</div></div>
           <div class="mini-metric"><div class="label">Next test</div><div class="metric-value">{html.escape(short_time(snapshot.get('next_candidate_check_at')))}</div><div class="metric-note">random jitter</div></div>
           <div class="mini-metric"><div class="label">Subscription</div><div class="metric-value">{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</div><div class="metric-note">last success</div></div>
-          <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{html.escape(seconds_left(snapshot.get('switch_cooldown_until')))}</div><div class="metric-note">quarantine {snapshot.get('quarantine_count', 0)}</div></div>
+          <div class="mini-metric"><div class="label">Failover</div><div class="metric-value">{html.escape(str(failover.get('state') or 'idle'))}</div><div class="metric-note">{html.escape(str(failover_note))}</div></div>
         </div>
       </div>
     </div>
@@ -672,6 +674,7 @@ def render_legacy_status_html():
     active_fallback = active_path.get("fallback") or fallback
     last_health = snapshot.get("last_health") or {}
     last_throughput = snapshot.get("last_throughput") or {}
+    failover = snapshot.get("failover_state") or {}
     last_candidate_check = snapshot.get("last_candidate_check") or {}
     sources = snapshot.get("sources") or {}
     tested_live = snapshot.get("tested_live_candidates") or []
@@ -756,6 +759,7 @@ def render_legacy_status_html():
     <div class="box"><div class="label">Fallback</div><div class="value">{html.escape(str(fallback.get('tag') or '-'))}<br>{html.escape(str(fallback.get('host') or ''))}</div></div>
     <div class="box"><div class="label">Health</div><div class="value">{html.escape(str(last_health.get('status') or '-'))} {html.escape(str(last_health.get('latency') or ''))}</div></div>
     <div class="box"><div class="label">Throughput</div><div class="value">{html.escape(str(last_throughput.get('status') or '-'))} {html.escape(str(last_throughput.get('kbps') or ''))} kbps</div></div>
+    <div class="box"><div class="label">Failover State</div><div class="value">{html.escape(str(failover.get('state') or 'idle'))}<br>{html.escape(str(failover.get('reason') or failover.get('kind') or '-'))}</div></div>
   </div>
   <h2>Active Path</h2>
   <div class="grid">

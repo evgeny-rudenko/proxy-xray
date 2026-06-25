@@ -3,6 +3,7 @@ import time
 
 from .assets import prepare_assets, refresh_assets, set_asset_status
 from .candidate_checker import candidate_check_enabled, random_check_delay, run_random_candidate_check
+from .failover import evaluate_cooldown, evaluate_failover, failover_state
 from .health import build_health_checks
 from .pool import select_active_pool, select_standby_pool
 from .state import load_state, persist_state
@@ -730,39 +731,36 @@ def run(args):
             )
             next_active_path_check = time.monotonic() + args.active_path_interval
 
-        failover_reason = None
         standby_ready_for_fast_failover = slot_alive(standby_slot) and standby_slot.get("healthy")
-        if failures >= args.max_failures:
-            failover_reason = f"connection failed {failures}/{args.max_failures}"
-        elif (
-            args.hot_standby_fast_failures > 0
-            and failures >= args.hot_standby_fast_failures
-            and standby_ready_for_fast_failover
-        ):
-            failover_reason = (
-                f"active path failed {failures}/{args.max_failures}; "
-                "healthy hot standby is ready"
+        decision = evaluate_failover(
+            args,
+            failures=failures,
+            slow_checks=slow_checks,
+            quality_slow_checks=quality_slow_checks,
+            throughput_slow_checks=throughput_slow_checks,
+            standby_ready=standby_ready_for_fast_failover,
+        )
+        next_failover_state = "triggered" if decision.triggered else "idle"
+        if not decision.triggered and switch_cooldown_until and now < switch_cooldown_until:
+            next_failover_state = "cooldown"
+        set_status(
+            failover_state=failover_state(
+                decision,
+                state=next_failover_state,
+                cooldown_until=switch_cooldown_until,
+                now_monotonic=now,
+                failures=failures,
+                slow_checks=slow_checks,
+                quality_slow_checks=quality_slow_checks,
+                throughput_slow_checks=throughput_slow_checks,
             )
-        elif args.degrade_checks > 0 and slow_checks >= args.degrade_checks:
-            failover_reason = (
-                f"connection degraded {slow_checks}/{args.degrade_checks}; "
-                f"latency >= {args.degrade_latency:.3f}s"
-            )
-        elif args.quality_degrade_checks > 0 and quality_slow_checks >= args.quality_degrade_checks:
-            failover_reason = (
-                f"quality degraded {quality_slow_checks}/{args.quality_degrade_checks}; "
-                f"speed < {args.quality_min_kbps:.0f} kbps"
-            )
-        elif args.throughput_degrade_checks > 0 and throughput_slow_checks >= args.throughput_degrade_checks:
-            failover_reason = (
-                f"throughput degraded {throughput_slow_checks}/{args.throughput_degrade_checks}; "
-                f"speed < {args.throughput_min_kbps:.0f} kbps"
-            )
+        )
 
-        if failover_reason:
-            full_failure = failures >= args.max_failures or failover_reason.startswith("active path failed")
-            if switch_cooldown_until and time.monotonic() < switch_cooldown_until and not full_failure:
-                remaining = max(1, int(switch_cooldown_until - time.monotonic()))
+        if decision.triggered:
+            failover_reason = decision.reason
+            cooldown = evaluate_cooldown(decision, switch_cooldown_until, now=now)
+            if cooldown.suppressed:
+                remaining = cooldown.remaining
                 log(f"{failover_reason}; switch suppressed by cooldown for {remaining}s")
                 failures = 0
                 slow_checks = 0
@@ -774,9 +772,31 @@ def run(args):
                     quality_slow_checks=0,
                     throughput_slow_checks=0,
                     switch_cooldown_until=time.time() + remaining,
+                    failover_state=failover_state(
+                        decision,
+                        state="suppressed",
+                        cooldown_until=switch_cooldown_until,
+                        now_monotonic=now,
+                        failures=0,
+                        slow_checks=0,
+                        quality_slow_checks=0,
+                        throughput_slow_checks=0,
+                    ),
                 )
                 continue
 
+            set_status(
+                failover_state=failover_state(
+                    decision,
+                    state="switching",
+                    cooldown_until=switch_cooldown_until,
+                    now_monotonic=now,
+                    failures=failures,
+                    slow_checks=slow_checks,
+                    quality_slow_checks=quality_slow_checks,
+                    throughput_slow_checks=throughput_slow_checks,
+                )
+            )
             old_active_slot = active_slot
             old_standby_slot = standby_slot
             old_active_candidate = old_active_slot.get("candidate")
@@ -804,7 +824,7 @@ def run(args):
                 )
                 standby_ok, _latency = check_slot(old_standby_slot, args)
 
-            throughput_failover = failover_reason.startswith("throughput degraded")
+            throughput_failover = decision.kind == "throughput_degraded"
             if standby_ok and throughput_failover and args.throughput_check_interval > 0:
                 for attempt in range(2):
                     large_ok, _standby_kbps = check_slot_large_download(old_standby_slot, args)
@@ -874,11 +894,22 @@ def run(args):
                     last_switch={
                         "time": time.time(),
                         "reason": failover_reason,
+                        "kind": decision.kind,
                         "standby_used": True,
                         "standby_mode": "hot-active",
                         "from": old_active_candidate.get("tag") if old_active_candidate else None,
                         "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
                     },
+                    failover_state=failover_state(
+                        decision,
+                        state="cooldown",
+                        cooldown_until=switch_cooldown_until,
+                        now_monotonic=time.monotonic(),
+                        failures=0,
+                        slow_checks=0,
+                        quality_slow_checks=0,
+                        throughput_slow_checks=0,
+                    ),
                 )
                 time.sleep(args.post_switch_notify_delay)
                 ok, latency = curl_check(1080, args.health_url, args.health_timeout)
@@ -921,6 +952,18 @@ def run(args):
             quality_slow_checks = 0
             throughput_slow_checks = 0
             set_status(failures=0, slow_checks=0, quality_slow_checks=0, throughput_slow_checks=0)
+            set_status(
+                failover_state=failover_state(
+                    decision,
+                    state="failed",
+                    cooldown_until=switch_cooldown_until,
+                    now_monotonic=time.monotonic(),
+                    failures=0,
+                    slow_checks=0,
+                    quality_slow_checks=0,
+                    throughput_slow_checks=0,
+                )
+            )
 
         if next_candidate_check is not None and time.monotonic() >= next_candidate_check:
             run_random_candidate_check(candidates, args)
