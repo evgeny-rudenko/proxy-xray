@@ -113,6 +113,109 @@ class PoolSelectionTest(unittest.TestCase):
 
         self.assertEqual(["vless://extra-1", "vless://extra-2", "vless://sub-0"], [item["uri"] for item in pool])
 
+    def test_active_pool_reserves_live_extra_candidate(self):
+        now = time.time()
+        extra = candidate("extra", "vless://extra", source="extra", last_ok_at=now)
+        subscription = candidate("sub", "vless://sub", last_ok_at=now)
+
+        pool = select_active_pool(
+            [subscription, extra],
+            size=2,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            now=now,
+        )
+
+        self.assertIn("vless://extra", [item["uri"] for item in pool])
+
+    def test_active_pool_reserves_old_live_extra_candidate(self):
+        now = time.time()
+        extra = candidate("extra", "vless://extra", source="extra", last_ok_at=now - 86400)
+        subscription = candidate("sub", "vless://sub", last_ok_at=now)
+
+        pool = select_active_pool(
+            [subscription, extra],
+            size=2,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            now=now,
+        )
+
+        self.assertIn("vless://extra", [item["uri"] for item in pool])
+
+    def test_active_pool_reserve_caps_extra_candidates_per_slot(self):
+        now = time.time()
+        extra_1 = candidate("extra-1", "vless://extra-1", source="extra", last_ok_at=now)
+        extra_2 = candidate("extra-2", "vless://extra-2", source="extra", last_ok_at=now)
+        sub_1 = candidate("sub-1", "vless://sub-1", last_ok_at=now)
+        sub_2 = candidate("sub-2", "vless://sub-2", last_ok_at=now)
+
+        pool = select_active_pool(
+            [extra_1, extra_2, sub_1, sub_2],
+            size=3,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            now=now,
+        )
+
+        self.assertEqual(1, sum(1 for item in pool if item["source"] == "extra"))
+
+    def test_active_pool_does_not_reserve_dead_extra_candidate(self):
+        now = time.time()
+        extra = candidate("extra", "vless://extra", source="extra", last_ok_at=now - 60, last_fail_at=now)
+        subscription = candidate("sub", "vless://sub", last_ok_at=now)
+
+        pool = select_active_pool(
+            [subscription, extra],
+            size=1,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            now=now,
+        )
+
+        self.assertEqual(["vless://sub"], [item["uri"] for item in pool])
+
+    def test_standby_pool_can_reserve_extra_on_same_host_as_active(self):
+        now = time.time()
+        active_extra = candidate_with_host("active-extra", "vless://active-extra", "same.example.com", source="extra", last_ok_at=now)
+        same_host_extra = candidate_with_host("same-extra", "vless://same-extra", "same.example.com", source="extra", last_ok_at=now)
+        other_host_extra = candidate_with_host("other-extra", "vless://other-extra", "other.example.com", source="extra", last_ok_at=now)
+        subscription = candidate_with_host("sub", "vless://sub", "sub.example.com", last_ok_at=now)
+
+        pool = select_standby_pool(
+            [same_host_extra, other_host_extra, subscription],
+            active_pool=[active_extra],
+            size=2,
+            max_age=600,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            extra_max_per_host=1,
+            now=now,
+        )
+
+        self.assertIn(pool[0]["uri"], {"vless://same-extra", "vless://other-extra"})
+        self.assertNotIn("vless://active-extra", [item["uri"] for item in pool])
+        self.assertEqual(1, sum(1 for item in pool if item["source"] == "extra"))
+
+    def test_standby_pool_reuses_active_extra_when_no_other_live_extra_exists(self):
+        now = time.time()
+        active_extra = candidate_with_host("active-extra", "vless://active-extra", "same.example.com", source="extra", last_ok_at=now)
+        subscription = candidate_with_host("sub", "vless://sub", "sub.example.com", last_ok_at=now)
+
+        pool = select_standby_pool(
+            [active_extra, subscription],
+            active_pool=[active_extra],
+            size=2,
+            max_age=600,
+            extra_reserve_per_slot=1,
+            extra_require_live=True,
+            extra_max_per_host=1,
+            now=now,
+        )
+
+        self.assertIn("vless://active-extra", [item["uri"] for item in pool])
+        self.assertEqual(1, sum(1 for item in pool if item["source"] == "extra"))
+
 
 if __name__ == "__main__":
     unittest.main()

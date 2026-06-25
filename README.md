@@ -112,6 +112,7 @@ The default compose uses:
 
 - active pool: `4` candidates;
 - standby pool: `3` candidates.
+- extra reserve: `1` live private extra URI per active/standby slot when available;
 - hot standby fast switch: `1` full active-path failure when standby is already healthy.
 - liveness check: every `20` seconds, failover after `2` failures;
 - quality download: every `60` seconds, 512 KB, failover after `2` slow checks;

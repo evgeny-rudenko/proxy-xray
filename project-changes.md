@@ -102,6 +102,7 @@ The supervisor now prepares two small pools instead of single-candidate slots:
 
 - active pool, `4` candidates by default in compose;
 - hot standby pool, `3` candidates by default in compose.
+- active and hot standby pools each reserve up to one live candidate from `vless-extra.txt` when available; the rest of the pool is filled from subscription candidates. If only one live extra URI exists, hot standby may reuse it instead of spending another subscription slot.
 
 The active pool receives public traffic through the stable TCP switches. The standby pool runs in a second Xray process and remains ready for slot-level failover.
 

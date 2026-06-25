@@ -658,6 +658,8 @@ scripts/deploy-server.sh home --smoke
 
 Статус: реализовано в первой v2-итерации. Active slot запускается с несколькими outbounds, startup preflight проверяет fallback до подключения публичных портов.
 
+Дополнение: active pool резервирует до одного live extra-кандидата, если такой есть, чтобы не тратить все места pool на подписку.
+
 Цель: active slot получает несколько candidates, но standby пока можно оставить простым.
 
 Работы:
@@ -690,6 +692,8 @@ scripts/deploy-server.sh home --smoke
 ### Этап 3. Standby pool
 
 Статус: реализовано в первой v2-итерации. Standby slot запускается отдельным Xray process с собственным небольшим pool и быстрым promotion при полном отказе active path.
+
+Дополнение: standby pool также резервирует до одного live extra-кандидата; если есть другой live extra URI, он предпочтительнее, но если live extra только один, standby может переиспользовать active extra URI.
 
 Цель: standby slot тоже получает несколько candidates.
 

@@ -28,6 +28,10 @@ usage() {
     echo "    --dns-ru <ip[,ip...]>                 RU upstream DNS servers"
     echo "    --dns-split-ru                        Resolve .ru, .su and .рф through RU DNS"
     echo "    --throughput-check-interval <seconds> Active path throughput interval"
+    echo "    --pool-extra-reserve-per-slot <count> Reserve live extra candidates per pool"
+    echo "    --pool-extra-max-per-host <count>     Max reserved extra candidates per host"
+    echo "    --pool-extra-require-live             Reserve only live extra candidates"
+    echo "    --no-pool-extra-require-live          Allow unchecked extra reserves"
     echo "    --throughput-url <url>                URL used for throughput checks"
     echo "    --throughput-min-kbps <kbps>          Minimum acceptable throughput"
     echo "    --throughput-max-time <seconds>       Throughput check timeout"
@@ -126,6 +130,10 @@ SUB_OBSERVATORY_PROBE_INTERVAL=""
 SUB_BALANCER_STRATEGY=""
 ACTIVE_POOL_SIZE=""
 STANDBY_POOL_SIZE=""
+POOL_EXTRA_RESERVE_PER_SLOT=""
+POOL_EXTRA_MAX_PER_HOST=""
+POOL_EXTRA_REQUIRE_LIVE=""
+POOL_EXTRA_REQUIRE_LIVE_SET=""
 
 DNS_GLOBAL="8.8.8.8"
 DNS_RU="77.88.8.8"
@@ -234,6 +242,22 @@ while [ $# -gt 0 ]; do
             ;;
         --standby-pool-size)
             need_value "$@"; STANDBY_POOL_SIZE="$2"; shift 2
+            ;;
+        --pool-extra-reserve-per-slot)
+            need_value "$@"; POOL_EXTRA_RESERVE_PER_SLOT="$2"; shift 2
+            ;;
+        --pool-extra-max-per-host)
+            need_value "$@"; POOL_EXTRA_MAX_PER_HOST="$2"; shift 2
+            ;;
+        --pool-extra-require-live)
+            POOL_EXTRA_REQUIRE_LIVE=--pool-extra-require-live
+            POOL_EXTRA_REQUIRE_LIVE_SET=1
+            shift
+            ;;
+        --no-pool-extra-require-live)
+            POOL_EXTRA_REQUIRE_LIVE=--no-pool-extra-require-live
+            POOL_EXTRA_REQUIRE_LIVE_SET=1
+            shift
             ;;
         --dns|--dns-global)
             need_value "$@"; DNS_GLOBAL="$2"; shift 2
@@ -411,6 +435,11 @@ append_arg "${SUB_OBSERVATORY_PROBE_INTERVAL}" --observatory-probe-interval
 append_arg "${SUB_BALANCER_STRATEGY}" --balancer-strategy
 append_arg "${ACTIVE_POOL_SIZE}" --active-pool-size
 append_arg "${STANDBY_POOL_SIZE}" --standby-pool-size
+append_arg "${POOL_EXTRA_RESERVE_PER_SLOT}" --pool-extra-reserve-per-slot
+append_arg "${POOL_EXTRA_MAX_PER_HOST}" --pool-extra-max-per-host
+if [ -n "${POOL_EXTRA_REQUIRE_LIVE_SET}" ]; then
+    SUPERVISOR_ARGS+=("${POOL_EXTRA_REQUIRE_LIVE}")
+fi
 append_arg "${THROUGHPUT_CHECK_INTERVAL}" --throughput-check-interval
 append_arg "${THROUGHPUT_URL}" --throughput-url
 append_arg "${THROUGHPUT_MIN_KBPS}" --throughput-min-kbps

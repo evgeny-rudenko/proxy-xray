@@ -46,6 +46,11 @@ services:
       - "4"
       - --standby-pool-size
       - "3"
+      - --pool-extra-reserve-per-slot
+      - "1"
+      - --pool-extra-max-per-host
+      - "1"
+      - --pool-extra-require-live
       - --throughput-check-interval
       - "300"
       - --throughput-url

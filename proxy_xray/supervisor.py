@@ -322,6 +322,10 @@ def rebuild_standby(standby_slot, candidates, active_pool, args, rules, inject, 
         standby_candidate=standby_slot.get("candidate"),
         size=getattr(args, "standby_pool_size", 1),
         max_age=args.standby_max_age,
+        extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
+        extra_require_live=getattr(args, "pool_extra_require_live", True),
+        extra_max_age=0,
+        extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
     )
     if not pool:
         log(f"{reason}; no candidate available for hot standby")
@@ -349,6 +353,10 @@ def start_active_with_preflight(active_slot, candidates, args, rules, inject, re
             candidates,
             active_candidate=primary_candidate(candidates),
             size=getattr(args, "active_pool_size", 1),
+            extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
+            extra_require_live=getattr(args, "pool_extra_require_live", True),
+            extra_max_age=0,
+            extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
         )
         if not pool:
             log(f"{reason}; no candidate available for active pool")
@@ -408,7 +416,15 @@ def run(args):
         log("startup; active preflight did not find a healthy pool, exposing best available pool")
         start_slot(
             active_slot,
-            select_active_pool(candidates, active_candidate=primary_candidate(candidates), size=args.active_pool_size),
+            select_active_pool(
+                candidates,
+                active_candidate=primary_candidate(candidates),
+                size=args.active_pool_size,
+                extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
+                extra_require_live=getattr(args, "pool_extra_require_live", True),
+                extra_max_age=0,
+                extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
+            ),
             args,
             rules,
             inject,
