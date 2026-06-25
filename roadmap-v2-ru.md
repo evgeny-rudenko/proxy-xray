@@ -738,6 +738,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 5. Быстрые quality checks
 
+Статус: реализовано. Compose использует liveness interval 20s / 2 failures, latency threshold 3s, small quality download 512 KB раз в 60s с failover после 2 медленных проверок. Heavy throughput оставлен как quality metric по умолчанию.
+
 Цель: сократить время реакции на деградацию.
 
 Работы:

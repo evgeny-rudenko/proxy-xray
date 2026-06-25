@@ -106,7 +106,7 @@ echo "${status_json}" | jq -e '.assets.items.geoip.size > 1000000 and .assets.it
     || fail "geo assets are too small"
 echo "${status_json}" | jq -e '.assets.last_success_at != null or .assets.items.geoip.mtime != null' >/dev/null \
     || fail "geo assets timestamp is missing"
-for health_key in xray_process socks_proxy http_proxy lan_vless throughput direct_internet subscription dns_ru dns_global telegram; do
+for health_key in xray_process socks_proxy http_proxy lan_vless quality_download throughput direct_internet subscription dns_ru dns_global telegram; do
     echo "${status_json}" | jq -e --arg key "${health_key}" '.health_checks[$key].status | type == "string"' >/dev/null \
         || fail "health check ${health_key} is missing"
 done

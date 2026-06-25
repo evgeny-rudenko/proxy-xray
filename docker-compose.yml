@@ -27,11 +27,11 @@ services:
       - --sub-post-start-refresh-delay
       - "15"
       - --sub-check-interval
-      - "60"
+      - "20"
       - --sub-max-failures
-      - "3"
+      - "2"
       - --sub-degrade-latency
-      - "6"
+      - "3"
       - --sub-degrade-checks
       - "3"
       - --sub-retry-interval
@@ -55,7 +55,17 @@ services:
       - --throughput-max-time
       - "20"
       - --throughput-degrade-checks
-      - "3"
+      - "0"
+      - --quality-check-interval
+      - "60"
+      - --quality-url
+      - "https://speed.cloudflare.com/__down?bytes=512000"
+      - --quality-min-kbps
+      - "1000"
+      - --quality-max-time
+      - "10"
+      - --quality-degrade-checks
+      - "2"
       - --standby-max-age
       - "600"
       - --failover-cooldown

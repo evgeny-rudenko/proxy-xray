@@ -103,11 +103,12 @@ def telegram_health(args, timeout):
     )
 
 
-def build_health_checks(args, xray_running, last_health, last_throughput, subscription_status):
+def build_health_checks(args, xray_running, last_health, last_quality, last_throughput, subscription_status):
     timeout = args.diagnostics_timeout
     checks = {
         "xray_process": health_item("ok" if xray_running else "fail", "Xray process", "running" if xray_running else "stopped"),
         "socks_proxy": status_from_existing("SOCKS proxy", last_health),
+        "quality_download": status_from_existing("Quality download", last_quality),
         "throughput": status_from_existing("Throughput", last_throughput),
         "subscription": subscription_health(subscription_status),
         "direct_internet": curl_probe("Direct internet", args.health_url, timeout),

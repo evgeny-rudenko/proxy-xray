@@ -242,6 +242,7 @@ def render_modern_health_grid(health_checks):
         "socks_proxy",
         "http_proxy",
         "lan_vless",
+        "quality_download",
         "dns_ru",
         "dns_global",
         "telegram",

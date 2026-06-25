@@ -13,7 +13,7 @@ The project runs Xray-Core behind stable local ports and supervises a pool of VL
 - VLESS subscription refresh every two hours by default.
 - Extra private VLESS links from `vless-extra.txt`.
 - Two active Xray slots: current path plus hot standby.
-- Health, latency, throughput, and random candidate checks.
+- Liveness, latency, small quality download, throughput, and random candidate checks.
 - RU split DNS and direct routing for `.ru`, `.su`, `.рф`, `geosite:category-ru`, and `geoip:ru`.
 - LoyalSoldier `geoip.dat` / `geosite.dat` asset management.
 - Telegram notification after successful failover recovery.
@@ -113,6 +113,9 @@ The default compose uses:
 - active pool: `4` candidates;
 - standby pool: `3` candidates.
 - hot standby fast switch: `1` full active-path failure when standby is already healthy.
+- liveness check: every `20` seconds, failover after `2` failures;
+- quality download: every `60` seconds, 512 KB, failover after `2` slow checks;
+- heavy throughput: every `300` seconds, used as a quality metric by default.
 
 Each slot still has a score-ordered fallback candidate, but Xray can choose between several outbounds inside the slot.
 
@@ -120,7 +123,7 @@ Failover can be triggered by:
 
 - repeated health-check failures;
 - repeated high latency;
-- repeated low throughput;
+- repeated low quality-download speed;
 - unhealthy current slot with a healthy hot standby available.
 
 On successful switch:
@@ -234,6 +237,7 @@ It checks:
 - HTTP proxy;
 - LAN VLESS inbound;
 - basic throughput;
+- small quality download status;
 - split DNS behavior;
 - RU direct-routing smoke access;
 - bundled LoyalSoldier assets.

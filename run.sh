@@ -32,6 +32,11 @@ usage() {
     echo "    --throughput-min-kbps <kbps>          Minimum acceptable throughput"
     echo "    --throughput-max-time <seconds>       Throughput check timeout"
     echo "    --throughput-degrade-checks <count>   Slow throughput checks before failover"
+    echo "    --quality-check-interval <seconds>    Small download quality-check interval"
+    echo "    --quality-url <url>                   URL used for small quality checks"
+    echo "    --quality-min-kbps <kbps>             Minimum acceptable quality-check speed"
+    echo "    --quality-max-time <seconds>          Small quality-check timeout"
+    echo "    --quality-degrade-checks <count>      Slow quality checks before failover"
     echo "    --standby-max-age <seconds>           Maximum age of a hot standby OK check"
     echo "    --failover-cooldown <seconds>         Suppress degraded failover after switch"
     echo "    --hot-standby-fast-failures <count>   Failures before using healthy hot standby"
@@ -131,6 +136,11 @@ THROUGHPUT_URL=""
 THROUGHPUT_MIN_KBPS=""
 THROUGHPUT_MAX_TIME=""
 THROUGHPUT_DEGRADE_CHECKS=""
+QUALITY_CHECK_INTERVAL=""
+QUALITY_URL=""
+QUALITY_MIN_KBPS=""
+QUALITY_MAX_TIME=""
+QUALITY_DEGRADE_CHECKS=""
 STANDBY_MAX_AGE=""
 FAILOVER_COOLDOWN=""
 HOT_STANDBY_FAST_FAILURES=""
@@ -249,6 +259,21 @@ while [ $# -gt 0 ]; do
             ;;
         --throughput-degrade-checks)
             need_value "$@"; THROUGHPUT_DEGRADE_CHECKS="$2"; shift 2
+            ;;
+        --quality-check-interval)
+            need_value "$@"; QUALITY_CHECK_INTERVAL="$2"; shift 2
+            ;;
+        --quality-url)
+            need_value "$@"; QUALITY_URL="$2"; shift 2
+            ;;
+        --quality-min-kbps)
+            need_value "$@"; QUALITY_MIN_KBPS="$2"; shift 2
+            ;;
+        --quality-max-time)
+            need_value "$@"; QUALITY_MAX_TIME="$2"; shift 2
+            ;;
+        --quality-degrade-checks)
+            need_value "$@"; QUALITY_DEGRADE_CHECKS="$2"; shift 2
             ;;
         --standby-max-age)
             need_value "$@"; STANDBY_MAX_AGE="$2"; shift 2
@@ -391,6 +416,11 @@ append_arg "${THROUGHPUT_URL}" --throughput-url
 append_arg "${THROUGHPUT_MIN_KBPS}" --throughput-min-kbps
 append_arg "${THROUGHPUT_MAX_TIME}" --throughput-max-time
 append_arg "${THROUGHPUT_DEGRADE_CHECKS}" --throughput-degrade-checks
+append_arg "${QUALITY_CHECK_INTERVAL}" --quality-check-interval
+append_arg "${QUALITY_URL}" --quality-url
+append_arg "${QUALITY_MIN_KBPS}" --quality-min-kbps
+append_arg "${QUALITY_MAX_TIME}" --quality-max-time
+append_arg "${QUALITY_DEGRADE_CHECKS}" --quality-degrade-checks
 append_arg "${STANDBY_MAX_AGE}" --standby-max-age
 append_arg "${FAILOVER_COOLDOWN}" --failover-cooldown
 append_arg "${HOT_STANDBY_FAST_FAILURES}" --hot-standby-fast-failures

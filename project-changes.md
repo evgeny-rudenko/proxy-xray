@@ -118,18 +118,25 @@ The supervisor still checks the active shared proxy path through SOCKS `1080`.
 Health checks:
 
 - default URL: `https://www.gstatic.com/generate_204`;
-- default interval: `60` seconds;
+- compose interval: `20` seconds;
 - failed checks increase the failure counter;
 - slow checks above `--sub-degrade-latency` increase the degradation counter.
+
+Quality download checks:
+
+- default URL: Cloudflare speed endpoint with a 512 KB download;
+- compose interval: `60` seconds;
+- default minimum speed: `1000` kbps;
+- repeated slow quality checks trigger hot-standby failover.
 
 Throughput checks:
 
 - default URL: Cloudflare speed endpoint with a 2 MB download;
 - default interval: `300` seconds;
 - default minimum speed: `1500` kbps;
-- repeated slow throughput checks trigger Xray restart.
+- heavy throughput is kept as a quality metric by default in compose.
 
-When failure or degradation reaches configured limits, the supervisor restarts Xray so native balancer selection can recover.
+When failure or degradation reaches configured limits, the supervisor promotes the hot standby slot when available.
 
 ## Random Candidate Checker
 

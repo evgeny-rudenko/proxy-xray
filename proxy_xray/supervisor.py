@@ -437,6 +437,7 @@ def run(args):
             f"retrying through the running proxy in {args.sub_post_start_refresh_delay}s"
         )
     next_health_check = now + 3
+    next_quality_check = now + 12 if args.quality_check_interval > 0 else None
     next_throughput_check = now + 8 if args.throughput_check_interval > 0 else None
     next_diagnostics_check = now + 2
     next_active_path_check = now + 2
@@ -457,8 +458,10 @@ def run(args):
 
     failures = 0
     slow_checks = 0
+    quality_slow_checks = 0
     throughput_slow_checks = 0
     last_health_status = None
+    last_quality_status = None
     last_throughput_status = None
     switch_cooldown_until = 0.0
 
@@ -478,6 +481,8 @@ def run(args):
             due_times.append(next_active_path_check)
         if next_asset_refresh is not None:
             due_times.append(next_asset_refresh)
+        if next_quality_check is not None:
+            due_times.append(next_quality_check)
         if next_throughput_check is not None:
             due_times.append(next_throughput_check)
         if next_candidate_check is not None:
@@ -586,6 +591,40 @@ def run(args):
             persist_state(args, candidates, active=active_slot.get("candidate"))
 
         if (
+            args.quality_check_interval > 0
+            and next_quality_check is not None
+            and now >= next_quality_check
+            and slot_alive(active_slot)
+        ):
+            ok, quality_kbps = throughput_check(1080, args.quality_url, args.quality_max_time)
+            next_quality_check = time.monotonic() + args.quality_check_interval
+            if ok and quality_kbps >= args.quality_min_kbps:
+                quality_slow_checks = 0
+                log(f"quality download ok: {quality_kbps:.0f} kbps")
+                last_quality_status = {
+                    "time": time.time(),
+                    "status": "ok",
+                    "kbps": round(quality_kbps),
+                }
+                if active_slot.get("candidate"):
+                    active_slot["candidate"]["last_throughput_kbps"] = round(quality_kbps)
+                set_status(last_quality=last_quality_status)
+            else:
+                quality_slow_checks += 1
+                log(
+                    f"quality download degraded {quality_slow_checks}/{args.quality_degrade_checks}: "
+                    f"{quality_kbps:.0f} kbps < {args.quality_min_kbps:.0f} kbps"
+                )
+                last_quality_status = {
+                    "time": time.time(),
+                    "status": "degraded",
+                    "kbps": round(quality_kbps),
+                }
+                set_status(last_quality=last_quality_status)
+            set_status(quality_slow_checks=quality_slow_checks)
+            persist_state(args, candidates, active=active_slot.get("candidate"))
+
+        if (
             args.throughput_check_interval > 0
             and next_throughput_check is not None
             and now >= next_throughput_check
@@ -624,6 +663,7 @@ def run(args):
                 args,
                 slot_alive(active_slot),
                 last_health_status or snapshot.get("last_health"),
+                last_quality_status or snapshot.get("last_quality"),
                 last_throughput_status or snapshot.get("last_throughput"),
                 snapshot.get("last_subscription_status"),
             )
@@ -658,6 +698,11 @@ def run(args):
                 f"connection degraded {slow_checks}/{args.degrade_checks}; "
                 f"latency >= {args.degrade_latency:.3f}s"
             )
+        elif args.quality_degrade_checks > 0 and quality_slow_checks >= args.quality_degrade_checks:
+            failover_reason = (
+                f"quality degraded {quality_slow_checks}/{args.quality_degrade_checks}; "
+                f"speed < {args.quality_min_kbps:.0f} kbps"
+            )
         elif args.throughput_degrade_checks > 0 and throughput_slow_checks >= args.throughput_degrade_checks:
             failover_reason = (
                 f"throughput degraded {throughput_slow_checks}/{args.throughput_degrade_checks}; "
@@ -671,10 +716,12 @@ def run(args):
                 log(f"{failover_reason}; switch suppressed by cooldown for {remaining}s")
                 failures = 0
                 slow_checks = 0
+                quality_slow_checks = 0
                 throughput_slow_checks = 0
                 set_status(
                     failures=0,
                     slow_checks=0,
+                    quality_slow_checks=0,
                     throughput_slow_checks=0,
                     switch_cooldown_until=time.time() + remaining,
                 )
@@ -764,6 +811,7 @@ def run(args):
                     xray_running=slot_alive(active_slot),
                     failures=0,
                     slow_checks=0,
+                    quality_slow_checks=0,
                     throughput_slow_checks=0,
                     switch_cooldown_until=time.time() + args.failover_cooldown,
                     active_pool=[public_candidate(candidate) for candidate in slot_candidates(active_slot)],
@@ -813,14 +861,16 @@ def run(args):
                     set_status(last_throughput=last_throughput_status)
                 failures = 0
                 slow_checks = 0
+                quality_slow_checks = 0
                 throughput_slow_checks = 0
                 continue
 
             log(f"{failover_reason}; no healthy standby was available")
             failures = 0
             slow_checks = 0
+            quality_slow_checks = 0
             throughput_slow_checks = 0
-            set_status(failures=0, slow_checks=0, throughput_slow_checks=0)
+            set_status(failures=0, slow_checks=0, quality_slow_checks=0, throughput_slow_checks=0)
 
         if next_candidate_check is not None and time.monotonic() >= next_candidate_check:
             run_random_candidate_check(candidates, args)
