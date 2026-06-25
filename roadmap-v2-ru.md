@@ -9,7 +9,8 @@
 - `v1` branch должен указывать на последнюю стабильную текущую версию.
 - `main` используется для последовательной реализации v2.
 - Первый технический шаг v2: ввести модель `active_pool` / `standby_pool` без изменения runtime-поведения Xray.
-- До переключения dataplane на pool mode публичные порты и single-candidate slots остаются как в текущей версии.
+- Второй технический шаг v2: запустить active и standby slots с маленькими Xray balancer pools.
+- Публичные порты остаются стабильными: `1080`, `8123`, `10086`, `18080`.
 
 Главное ограничение: функционал прокси обязателен. После всех доработок должны сохраниться стабильные пользовательские порты:
 
@@ -240,7 +241,8 @@ standby_pool_disjoint_from_active = true
 - UI показывает hot standby pool и его выбранный outbound;
 - standby Xray process постоянно запущен;
 - standby проверяется в фоне;
-- при failover public ports переключаются на standby slot.
+- при failover public ports переключаются на standby slot;
+- если active path полностью упал, а standby уже healthy, hot switch происходит после первого полного fail активного пути.
 
 ### 6.4. Native Xray observatory/balancer внутри каждого pool
 
@@ -654,6 +656,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 2. Active pool в одном slot
 
+Статус: реализовано в первой v2-итерации. Active slot запускается с несколькими outbounds, startup preflight проверяет fallback до подключения публичных портов.
+
 Цель: active slot получает несколько candidates, но standby пока можно оставить простым.
 
 Работы:
@@ -684,6 +688,8 @@ scripts/deploy-server.sh home --smoke
 - Xray process не рестартится бесконечно из-за неустойчивого fingerprint.
 
 ### Этап 3. Standby pool
+
+Статус: реализовано в первой v2-итерации. Standby slot запускается отдельным Xray process с собственным небольшим pool и быстрым promotion при полном отказе active path.
 
 Цель: standby slot тоже получает несколько candidates.
 

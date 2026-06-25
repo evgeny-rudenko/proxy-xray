@@ -12,6 +12,10 @@ def candidate_uri(candidate):
     return candidate.get("uri") if candidate else None
 
 
+def candidate_host(candidate):
+    return (candidate.get("host") or "").lower() if candidate else ""
+
+
 def normalize_pool_size(size, default=1):
     try:
         value = int(size)
@@ -30,7 +34,13 @@ def candidate_is_recent_live(candidate, max_age=0, now=None):
     return bool(last_ok_at and now - float(last_ok_at) <= max_age)
 
 
-def append_seed(result, seen_uris, seed):
+def increment_host_count(host_counts, candidate):
+    host = candidate_host(candidate)
+    if host:
+        host_counts[host] = host_counts.get(host, 0) + 1
+
+
+def append_seed(result, seen_uris, host_counts, seed):
     uri = candidate_uri(seed)
     if not seed or not uri or uri in seen_uris:
         return
@@ -38,6 +48,7 @@ def append_seed(result, seen_uris, seed):
         return
     result.append(seed)
     seen_uris.add(uri)
+    increment_host_count(host_counts, seed)
 
 
 def select_candidate_pool(
@@ -46,6 +57,8 @@ def select_candidate_pool(
     exclude_uris=None,
     live_only=False,
     max_age=0,
+    max_per_host=2,
+    host_counts=None,
     now=None,
 ):
     size = normalize_pool_size(size)
@@ -53,6 +66,7 @@ def select_candidate_pool(
         return []
 
     seen_uris = set(exclude_uris or [])
+    host_counts = dict(host_counts or {})
     result = []
     ordered = native_candidate_order(candidates)
 
@@ -69,8 +83,12 @@ def select_candidate_pool(
                 continue
             if live_only and not candidate_is_recent_live(candidate, max_age=max_age, now=now):
                 continue
+            host = candidate_host(candidate)
+            if max_per_host > 0 and host and host_counts.get(host, 0) >= max_per_host:
+                continue
             result.append(candidate)
             seen_uris.add(uri)
+            increment_host_count(host_counts, candidate)
     return result
 
 
@@ -78,7 +96,9 @@ def select_active_pool(candidates, active_candidate=None, size=1, now=None):
     size = normalize_pool_size(size)
     result = []
     seen_uris = set()
-    append_seed(result, seen_uris, active_candidate)
+    host_counts = {}
+    if size == 1:
+        append_seed(result, seen_uris, host_counts, active_candidate)
     if len(result) >= size:
         return result[:size]
     result.extend(
@@ -86,6 +106,7 @@ def select_active_pool(candidates, active_candidate=None, size=1, now=None):
             candidates,
             size=size - len(result),
             exclude_uris=seen_uris,
+            host_counts=host_counts,
             live_only=False,
             now=now,
         )
@@ -98,8 +119,9 @@ def select_standby_pool(candidates, active_pool=None, standby_candidate=None, si
     result = []
     excluded = {candidate_uri(candidate) for candidate in active_pool or [] if candidate_uri(candidate)}
     seen_uris = set(excluded)
+    host_counts = {}
 
-    append_seed(result, seen_uris, standby_candidate)
+    append_seed(result, seen_uris, host_counts, standby_candidate)
     if len(result) >= size:
         return result[:size]
 
@@ -107,12 +129,15 @@ def select_standby_pool(candidates, active_pool=None, standby_candidate=None, si
         candidates,
         size=size - len(result),
         exclude_uris=seen_uris,
+        host_counts=host_counts,
         live_only=True,
         max_age=max_age,
         now=now,
     )
     result.extend(fresh)
     seen_uris.update(candidate_uri(candidate) for candidate in fresh if candidate_uri(candidate))
+    for candidate in fresh:
+        increment_host_count(host_counts, candidate)
     if len(result) >= size:
         return result
 
@@ -120,12 +145,15 @@ def select_standby_pool(candidates, active_pool=None, standby_candidate=None, si
         candidates,
         size=size - len(result),
         exclude_uris=seen_uris,
+        host_counts=host_counts,
         live_only=True,
         max_age=0,
         now=now,
     )
     result.extend(last_known_good)
     seen_uris.update(candidate_uri(candidate) for candidate in last_known_good if candidate_uri(candidate))
+    for candidate in last_known_good:
+        increment_host_count(host_counts, candidate)
     if len(result) >= size:
         return result
 
@@ -134,6 +162,7 @@ def select_standby_pool(candidates, active_pool=None, standby_candidate=None, si
             candidates,
             size=size - len(result),
             exclude_uris=seen_uris,
+            host_counts=host_counts,
             live_only=False,
             now=now,
         )

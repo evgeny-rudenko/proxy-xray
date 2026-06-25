@@ -338,6 +338,8 @@ def render_status_html():
     current_transport = f"{current.get('network') or '-'} / {current.get('security') or '-'}"
     standby_display = hot_standby_candidate or standby
     standby_endpoint = endpoint_text(standby_display) if standby_display else "-"
+    active_pool_size = active_backend.get("pool_size") or active_path.get("pool_size") or len(snapshot.get("active_pool") or [])
+    standby_pool_size = hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or [])
     xray_chip_class = "ok" if active_backend.get("running", snapshot.get("xray_running")) else "fail"
     xray_chip_text = "running" if active_backend.get("running", snapshot.get("xray_running")) else "stopped"
     hot_chip_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
@@ -533,7 +535,9 @@ def render_status_html():
       <div class="chips">
         <span class="chip {xray_chip_class}">{xray_chip_text}</span>
         <span class="chip blue">balancer {html.escape(str(active_path.get('strategy') or '-'))}</span>
+        <span class="chip blue">active pool {active_pool_size}</span>
         <span class="chip {hot_chip_class}">hot {html.escape(str(hot_standby_candidate.get('tag') or '-'))}</span>
+        <span class="chip {hot_chip_class}">hot pool {standby_pool_size}</span>
       </div>
       <div class="connection-grid">
         <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>

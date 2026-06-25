@@ -42,6 +42,10 @@ services:
       - "10s"
       - --sub-balancer-strategy
       - "leastPing"
+      - --active-pool-size
+      - "4"
+      - --standby-pool-size
+      - "3"
       - --throughput-check-interval
       - "300"
       - --throughput-url
@@ -56,6 +60,8 @@ services:
       - "600"
       - --failover-cooldown
       - "180"
+      - --hot-standby-fast-failures
+      - "1"
       - --quarantine-duration
       - "900"
       - --candidate-check-min-interval

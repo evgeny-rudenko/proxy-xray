@@ -17,6 +17,8 @@ usage() {
     echo "    --sub-max-failures <count>            Failed health checks before failover"
     echo "    --sub-degrade-latency <seconds>       Slow active health-check threshold"
     echo "    --sub-degrade-checks <count>          Slow checks before failover"
+    echo "    --active-pool-size <count>            VLESS candidates in the active Xray slot"
+    echo "    --standby-pool-size <count>           VLESS candidates in the hot standby Xray slot"
     echo "    --sub-retry-interval <seconds>        Wait before retrying when no servers work"
     echo "    --sub-state-file <path>               Candidate state path"
     echo "    --sub-health-url <url>                URL used for health checks"
@@ -32,6 +34,7 @@ usage() {
     echo "    --throughput-degrade-checks <count>   Slow throughput checks before failover"
     echo "    --standby-max-age <seconds>           Maximum age of a hot standby OK check"
     echo "    --failover-cooldown <seconds>         Suppress degraded failover after switch"
+    echo "    --hot-standby-fast-failures <count>   Failures before using healthy hot standby"
     echo "    --quarantine-duration <seconds>       Soft-quarantine failed primary duration"
     echo "    --candidate-check-min-interval <s>    Minimum random candidate check delay"
     echo "    --candidate-check-max-interval <s>    Maximum random candidate check delay"
@@ -116,6 +119,8 @@ SUB_STATE_FILE=""
 SUB_HEALTH_URL=""
 SUB_OBSERVATORY_PROBE_INTERVAL=""
 SUB_BALANCER_STRATEGY=""
+ACTIVE_POOL_SIZE=""
+STANDBY_POOL_SIZE=""
 
 DNS_GLOBAL="8.8.8.8"
 DNS_RU="77.88.8.8"
@@ -128,6 +133,7 @@ THROUGHPUT_MAX_TIME=""
 THROUGHPUT_DEGRADE_CHECKS=""
 STANDBY_MAX_AGE=""
 FAILOVER_COOLDOWN=""
+HOT_STANDBY_FAST_FAILURES=""
 QUARANTINE_DURATION=""
 CANDIDATE_CHECK_MIN_INTERVAL=""
 CANDIDATE_CHECK_MAX_INTERVAL=""
@@ -213,6 +219,12 @@ while [ $# -gt 0 ]; do
         --sub-balancer-strategy)
             need_value "$@"; SUB_BALANCER_STRATEGY="$2"; shift 2
             ;;
+        --active-pool-size)
+            need_value "$@"; ACTIVE_POOL_SIZE="$2"; shift 2
+            ;;
+        --standby-pool-size)
+            need_value "$@"; STANDBY_POOL_SIZE="$2"; shift 2
+            ;;
         --dns|--dns-global)
             need_value "$@"; DNS_GLOBAL="$2"; shift 2
             ;;
@@ -243,6 +255,9 @@ while [ $# -gt 0 ]; do
             ;;
         --failover-cooldown)
             need_value "$@"; FAILOVER_COOLDOWN="$2"; shift 2
+            ;;
+        --hot-standby-fast-failures)
+            need_value "$@"; HOT_STANDBY_FAST_FAILURES="$2"; shift 2
             ;;
         --quarantine-duration)
             need_value "$@"; QUARANTINE_DURATION="$2"; shift 2
@@ -369,6 +384,8 @@ append_arg "${SUB_STATE_FILE}" --state-file
 append_arg "${SUB_HEALTH_URL}" --health-url
 append_arg "${SUB_OBSERVATORY_PROBE_INTERVAL}" --observatory-probe-interval
 append_arg "${SUB_BALANCER_STRATEGY}" --balancer-strategy
+append_arg "${ACTIVE_POOL_SIZE}" --active-pool-size
+append_arg "${STANDBY_POOL_SIZE}" --standby-pool-size
 append_arg "${THROUGHPUT_CHECK_INTERVAL}" --throughput-check-interval
 append_arg "${THROUGHPUT_URL}" --throughput-url
 append_arg "${THROUGHPUT_MIN_KBPS}" --throughput-min-kbps
@@ -376,6 +393,7 @@ append_arg "${THROUGHPUT_MAX_TIME}" --throughput-max-time
 append_arg "${THROUGHPUT_DEGRADE_CHECKS}" --throughput-degrade-checks
 append_arg "${STANDBY_MAX_AGE}" --standby-max-age
 append_arg "${FAILOVER_COOLDOWN}" --failover-cooldown
+append_arg "${HOT_STANDBY_FAST_FAILURES}" --hot-standby-fast-failures
 append_arg "${QUARANTINE_DURATION}" --quarantine-duration
 append_arg "${CANDIDATE_CHECK_MIN_INTERVAL}" --candidate-check-min-interval
 append_arg "${CANDIDATE_CHECK_MAX_INTERVAL}" --candidate-check-max-interval

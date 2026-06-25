@@ -88,7 +88,7 @@ Candidate tags are generated as:
 
 ## Native Xray Observatory And Balancer
 
-Instead of selecting one outbound in Python, the generated Xray config now contains many VLESS outbounds and uses native Xray:
+The generated Xray config uses native Xray balancer/observatory inside each runtime slot:
 
 - `observatory` checks `proxy-extra-*` and `proxy-sub-*` outbounds;
 - `enableConcurrency` is `false`, so Xray does not probe all VLESS servers concurrently;
@@ -97,6 +97,15 @@ Instead of selecting one outbound in Python, the generated Xray config now conta
 - default strategy is `leastPing`;
 - default catch-all traffic goes through the balancer;
 - fallback tag is the first candidate after ranking.
+
+The supervisor now prepares two small pools instead of single-candidate slots:
+
+- active pool, `4` candidates by default in compose;
+- hot standby pool, `3` candidates by default in compose.
+
+The active pool receives public traffic through the stable TCP switches. The standby pool runs in a second Xray process and remains ready for slot-level failover.
+
+Startup now performs an active-slot preflight check before attaching public ports. A dead fallback candidate is soft-quarantined and another active pool is tried. During runtime, a healthy hot standby can be promoted after the first full active-path failure, so the system does not wait for several public timeout cycles when a ready standby path already exists.
 
 Candidates with a recent successful per-candidate check are sorted first. This makes the native fallback prefer a known live server after Xray restart/failover while observatory probes catch up.
 

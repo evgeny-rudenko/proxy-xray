@@ -105,8 +105,16 @@ Replace:
 
 The supervisor starts two Xray instances:
 
-- active slot: receives public `1080`, `8123`, and `10086` through a local TCP switch;
-- standby slot: already running with another candidate and checked in the background.
+- active slot: receives public `1080`, `8123`, and `10086` through a local TCP switch and runs a small Xray balancer pool;
+- standby slot: already running with a separate hot standby balancer pool and checked in the background.
+
+The default compose uses:
+
+- active pool: `4` candidates;
+- standby pool: `3` candidates.
+- hot standby fast switch: `1` full active-path failure when standby is already healthy.
+
+Each slot still has a score-ordered fallback candidate, but Xray can choose between several outbounds inside the slot.
 
 Failover can be triggered by:
 
@@ -118,12 +126,14 @@ Failover can be triggered by:
 On successful switch:
 
 1. Public ports are pointed to the standby slot.
-2. The previous active candidate is soft-quarantined.
+2. The previous active fallback candidate is soft-quarantined.
 3. A new standby is built.
 4. `state.json` is updated.
 5. Telegram notification is sent if configured.
 
 Candidate checks are intentionally sequential. One random candidate is tested every 2-5 minutes by default, with extra-list servers weighted higher. This avoids hammering a subscription with many concurrent VLESS connections.
+
+At startup the active slot must pass a preflight health check before public ports are attached to it. If the first fallback in the pool is dead, it is soft-quarantined and another pool is tried.
 
 ## Routing And DNS
 

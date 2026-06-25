@@ -53,6 +53,8 @@ def fresh_slot(template):
             "proc": None,
             "candidate": None,
             "candidate_uri": None,
+            "candidates": [],
+            "candidate_uris": [],
             "fingerprint": None,
             "healthy": False,
             "failures": 0,
@@ -72,6 +74,26 @@ def stop_slot(slot):
     terminate_process(slot.get("proc"))
     slot["proc"] = None
     slot["healthy"] = False
+    slot["candidate"] = None
+    slot["candidate_uri"] = None
+    slot["candidates"] = []
+    slot["candidate_uris"] = []
+
+
+def normalize_slot_candidates(candidates):
+    if not candidates:
+        return []
+    if isinstance(candidates, dict):
+        return [candidates]
+    return [candidate for candidate in candidates if candidate]
+
+
+def slot_candidates(slot):
+    return normalize_slot_candidates(slot.get("candidates") or slot.get("candidate"))
+
+
+def slot_candidate_tags(slot):
+    return ", ".join(candidate.get("tag") or "unknown" for candidate in slot_candidates(slot)) or "-"
 
 
 def candidate_by_uri(candidates, uri):
@@ -85,8 +107,19 @@ def candidate_by_uri(candidates, uri):
 
 def refresh_slot_candidate_refs(slots, candidates):
     for slot in slots:
+        refreshed = []
+        for uri in slot.get("candidate_uris", []):
+            candidate = candidate_by_uri(candidates, uri)
+            if candidate:
+                refreshed.append(candidate)
+        if refreshed:
+            slot["candidates"] = refreshed
+            slot["candidate"] = refreshed[0]
+            slot["candidate_uri"] = refreshed[0].get("uri")
+            continue
         candidate = candidate_by_uri(candidates, slot.get("candidate_uri"))
         if candidate:
+            slot["candidates"] = [candidate]
             slot["candidate"] = candidate
 
 
@@ -116,10 +149,14 @@ def candidate_label(candidate):
     return candidate.get("tag") or candidate.get("name") or f"{candidate.get('host')}:{candidate.get('port')}"
 
 
-def start_slot(slot, candidate, args, rules, inject, active=False):
+def start_slot(slot, candidates, args, rules, inject, active=False):
+    candidates = normalize_slot_candidates(candidates)
+    if not candidates:
+        stop_slot(slot)
+        return slot
     stop_slot(slot)
-    proc, _ordered, fingerprint = start_native_xray(
-        [candidate],
+    proc, ordered, fingerprint = start_native_xray(
+        candidates,
         args,
         rules,
         inject,
@@ -132,9 +169,12 @@ def start_slot(slot, candidate, args, rules, inject, active=False):
         label=f"{slot['name']} {'active' if active else 'hot standby'}",
         update_status_config=active,
     )
+    fallback = ordered[0]
     slot["proc"] = proc
-    slot["candidate"] = candidate
-    slot["candidate_uri"] = candidate.get("uri")
+    slot["candidates"] = ordered
+    slot["candidate_uris"] = [candidate.get("uri") for candidate in ordered if candidate.get("uri")]
+    slot["candidate"] = fallback
+    slot["candidate_uri"] = fallback.get("uri")
     slot["fingerprint"] = fingerprint
     slot["healthy"] = False
     slot["failures"] = 0
@@ -194,6 +234,7 @@ def check_slot_large_download(slot, args):
 
 def slot_public_status(slot):
     candidate = slot.get("candidate")
+    candidates = slot_candidates(slot)
     return {
         "name": slot.get("name"),
         "running": slot_alive(slot),
@@ -206,6 +247,8 @@ def slot_public_status(slot):
             "api": slot.get("api_port"),
         },
         "candidate": public_candidate(candidate) if candidate else None,
+        "candidates": [public_candidate(candidate) for candidate in candidates],
+        "pool_size": len(candidates),
         "last_health": slot.get("last_health"),
         "started_at": slot.get("started_at"),
     }
@@ -214,6 +257,7 @@ def slot_public_status(slot):
 def active_path_for_slot(slot):
     candidate = slot.get("candidate")
     selected = public_candidate(candidate) if candidate else None
+    candidates = slot_candidates(slot)
     return {
         "status": "ok" if slot_alive(slot) else "fail",
         "detail": "dual-active slot via TCP switch",
@@ -223,23 +267,15 @@ def active_path_for_slot(slot):
         "selected_tag": selected.get("tag") if selected else None,
         "selected": selected,
         "fallback": selected,
+        "pool": [public_candidate(candidate) for candidate in candidates],
+        "pool_size": len(candidates),
         "raw": "",
     }
 
 
 def set_runtime_status(candidates, args, active_slot, standby_slot):
-    active_pool = select_active_pool(
-        candidates,
-        active_candidate=active_slot.get("candidate"),
-        size=getattr(args, "active_pool_size", 1),
-    )
-    standby_pool = select_standby_pool(
-        candidates,
-        active_pool=active_pool,
-        standby_candidate=standby_slot.get("candidate"),
-        size=getattr(args, "standby_pool_size", 1),
-        max_age=args.standby_max_age,
-    )
+    active_pool = slot_candidates(active_slot)
+    standby_pool = slot_candidates(standby_slot)
     set_status(
         **status_candidate_fields(candidates, args.standby_max_age),
         xray_running=slot_alive(active_slot),
@@ -251,18 +287,72 @@ def set_runtime_status(candidates, args, active_slot, standby_slot):
     )
 
 
-def rebuild_standby(standby_slot, candidates, active_candidate, args, rules, inject, reason):
-    candidate, mode = select_standby_candidate(candidates, active_candidate, args)
-    if not candidate:
+def rebuild_standby(standby_slot, candidates, active_pool, args, rules, inject, reason):
+    active_pool = normalize_slot_candidates(active_pool)
+    pool = select_standby_pool(
+        candidates,
+        active_pool=active_pool,
+        standby_candidate=standby_slot.get("candidate"),
+        size=getattr(args, "standby_pool_size", 1),
+        max_age=args.standby_max_age,
+    )
+    if not pool:
         log(f"{reason}; no candidate available for hot standby")
         stop_slot(standby_slot)
         return None
+    mode = "pool"
+    fallback = pool[0]
     log(
         f"{reason}; starting hot standby from {mode}: "
-        f"{candidate_label(candidate)} ({candidate.get('host')}:{candidate.get('port')})"
+        f"{candidate_label(fallback)} ({fallback.get('host')}:{fallback.get('port')}); "
+        f"pool={len(pool)}"
     )
-    start_slot(standby_slot, candidate, args, rules, inject, active=False)
-    return candidate
+    start_slot(standby_slot, pool, args, rules, inject, active=False)
+    return pool
+
+
+def start_active_with_preflight(active_slot, candidates, args, rules, inject, reason, attempts=None):
+    attempt_count = attempts or max(
+        3,
+        getattr(args, "active_pool_size", 1) + getattr(args, "standby_pool_size", 1),
+    )
+    warmup_delay = max(0.0, float(getattr(args, "candidate_check_start_delay", 0.0)))
+    for attempt in range(max(1, attempt_count)):
+        pool = select_active_pool(
+            candidates,
+            active_candidate=primary_candidate(candidates),
+            size=getattr(args, "active_pool_size", 1),
+        )
+        if not pool:
+            log(f"{reason}; no candidate available for active pool")
+            stop_slot(active_slot)
+            return False
+
+        start_slot(active_slot, pool, args, rules, inject, active=True)
+        if warmup_delay > 0:
+            time.sleep(warmup_delay)
+        ok, latency = check_slot(active_slot, args)
+        if ok:
+            log(
+                f"{reason}; active pool ready via {candidate_label(active_slot['candidate'])} "
+                f"({latency:.3f}s); pool={len(slot_candidates(active_slot))}"
+            )
+            return True
+
+        failed = active_slot.get("candidate")
+        if failed:
+            quarantine_candidate(
+                failed,
+                args.quarantine_duration,
+                f"{reason} active preflight failed",
+            )
+            log(
+                f"{reason}; active preflight failed for {candidate_label(failed)} "
+                f"({attempt + 1}/{max(1, attempt_count)}), trying another fallback"
+            )
+        stop_slot(active_slot)
+        candidates = native_candidate_order(candidates)
+    return False
 
 
 def run(args):
@@ -287,10 +377,18 @@ def run(args):
     switches = {}
     stopping = False
 
-    primary = primary_candidate(candidates)
-    start_slot(active_slot, primary, args, rules, inject, active=True)
+    if not start_active_with_preflight(active_slot, candidates, args, rules, inject, "startup"):
+        log("startup; active preflight did not find a healthy pool, exposing best available pool")
+        start_slot(
+            active_slot,
+            select_active_pool(candidates, active_candidate=primary_candidate(candidates), size=args.active_pool_size),
+            args,
+            rules,
+            inject,
+            active=True,
+        )
     switches = start_switches(active_slot, args)
-    rebuild_standby(standby_slot, candidates, active_slot.get("candidate"), args, rules, inject, "startup")
+    rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "startup")
     persist_state(args, candidates, active=active_slot.get("candidate"))
     set_status(
         standby_policy={
@@ -368,8 +466,8 @@ def run(args):
                 next_refresh = time.monotonic() + args.refresh_interval
                 candidates = native_candidate_order(new_candidates)
                 refresh_slot_candidate_refs((active_slot, standby_slot), candidates)
-                if not slot_alive(standby_slot) or not standby_slot.get("candidate"):
-                    rebuild_standby(standby_slot, candidates, active_slot.get("candidate"), args, rules, inject, "subscription refresh")
+                if not slot_alive(standby_slot) or not slot_candidates(standby_slot):
+                    rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "subscription refresh")
                 persist_state(args, candidates, active=active_slot.get("candidate"))
                 set_status(last_refresh_at=time.time())
                 set_runtime_status(candidates, args, active_slot, standby_slot)
@@ -382,13 +480,13 @@ def run(args):
                 next_asset_refresh = time.monotonic() + args.asset_refresh_interval
                 if assets_changed:
                     log("geo assets changed; rebuilding active and hot standby xray slots")
-                    active_candidate = active_slot.get("candidate")
-                    standby_candidate_obj = standby_slot.get("candidate")
-                    if active_candidate:
-                        start_slot(active_slot, active_candidate, args, rules, inject, active=True)
+                    active_candidates = slot_candidates(active_slot)
+                    standby_candidates = slot_candidates(standby_slot)
+                    if active_candidates:
+                        start_slot(active_slot, active_candidates, args, rules, inject, active=True)
                         set_switch_targets(switches, active_slot)
-                    if standby_candidate_obj:
-                        start_slot(standby_slot, standby_candidate_obj, args, rules, inject, active=False)
+                    if standby_candidates:
+                        start_slot(standby_slot, standby_candidates, args, rules, inject, active=False)
                     set_runtime_status(candidates, args, active_slot, standby_slot)
                     continue
             except Exception as exc:
@@ -435,12 +533,12 @@ def run(args):
                     set_status(xray_running=True, last_health=last_health_status)
                 set_status(failures=failures, slow_checks=slow_checks)
 
-            if standby_slot.get("candidate"):
+            if slot_candidates(standby_slot):
                 standby_ok, standby_latency = check_slot(standby_slot, args)
                 if standby_ok:
                     log(
                         f"hot standby ok "
-                        f"{standby_slot['candidate'].get('tag')} ({standby_latency:.3f}s)"
+                        f"{slot_candidate_tags(standby_slot)} ({standby_latency:.3f}s)"
                     )
                 elif standby_slot.get("failures", 0) >= args.max_failures:
                     failed = standby_slot.get("candidate")
@@ -449,7 +547,7 @@ def run(args):
                     rebuild_standby(
                         standby_slot,
                         candidates,
-                        active_slot.get("candidate"),
+                        slot_candidates(active_slot),
                         args,
                         rules,
                         inject,
@@ -509,8 +607,18 @@ def run(args):
             next_active_path_check = time.monotonic() + args.active_path_interval
 
         failover_reason = None
+        standby_ready_for_fast_failover = slot_alive(standby_slot) and standby_slot.get("healthy")
         if failures >= args.max_failures:
             failover_reason = f"connection failed {failures}/{args.max_failures}"
+        elif (
+            args.hot_standby_fast_failures > 0
+            and failures >= args.hot_standby_fast_failures
+            and standby_ready_for_fast_failover
+        ):
+            failover_reason = (
+                f"active path failed {failures}/{args.max_failures}; "
+                "healthy hot standby is ready"
+            )
         elif args.degrade_checks > 0 and slow_checks >= args.degrade_checks:
             failover_reason = (
                 f"connection degraded {slow_checks}/{args.degrade_checks}; "
@@ -523,7 +631,7 @@ def run(args):
             )
 
         if failover_reason:
-            full_failure = failures >= args.max_failures
+            full_failure = failures >= args.max_failures or failover_reason.startswith("active path failed")
             if switch_cooldown_until and time.monotonic() < switch_cooldown_until and not full_failure:
                 remaining = max(1, int(switch_cooldown_until - time.monotonic()))
                 log(f"{failover_reason}; switch suppressed by cooldown for {remaining}s")
@@ -541,6 +649,7 @@ def run(args):
             old_active_slot = active_slot
             old_standby_slot = standby_slot
             old_active_candidate = old_active_slot.get("candidate")
+            old_active_pool = slot_candidates(old_active_slot)
             standby_ok = slot_alive(old_standby_slot) and old_standby_slot.get("healthy")
             if not standby_ok and slot_alive(old_standby_slot):
                 standby_ok, _latency = check_slot(old_standby_slot, args)
@@ -556,7 +665,7 @@ def run(args):
                 rebuild_standby(
                     old_standby_slot,
                     candidates,
-                    old_active_candidate,
+                    old_active_pool,
                     args,
                     rules,
                     inject,
@@ -580,7 +689,7 @@ def run(args):
                     rebuild_standby(
                         old_standby_slot,
                         candidates,
-                        old_active_candidate,
+                        old_active_pool,
                         args,
                         rules,
                         inject,
@@ -598,14 +707,15 @@ def run(args):
                 log(
                     f"{failover_reason}; switched public ports to hot standby "
                     f"{active_slot['candidate'].get('tag')} "
-                    f"({active_slot['candidate'].get('host')}:{active_slot['candidate'].get('port')})"
+                    f"({active_slot['candidate'].get('host')}:{active_slot['candidate'].get('port')}); "
+                    f"pool={len(slot_candidates(active_slot))}"
                 )
                 candidates = promote_candidate(candidates, active_slot.get("candidate"))
                 stop_slot(standby_slot)
                 rebuild_standby(
                     standby_slot,
                     candidates,
-                    active_slot.get("candidate"),
+                    slot_candidates(active_slot),
                     args,
                     rules,
                     inject,
@@ -620,7 +730,9 @@ def run(args):
                     slow_checks=0,
                     throughput_slow_checks=0,
                     switch_cooldown_until=time.time() + args.failover_cooldown,
+                    active_pool=[public_candidate(candidate) for candidate in slot_candidates(active_slot)],
                     active_backend=slot_public_status(active_slot),
+                    standby_pool=[public_candidate(candidate) for candidate in slot_candidates(standby_slot)],
                     hot_standby=slot_public_status(standby_slot),
                     active_path=active_path_for_slot(active_slot),
                     last_switch={
@@ -650,7 +762,7 @@ def run(args):
                     set_status(last_health=last_health_status, active_backend=slot_public_status(active_slot))
                     send_telegram_notification(
                         args,
-                        native_recovery_message(failover_reason, [active_slot["candidate"]], latency, throughput_kbps),
+                        native_recovery_message(failover_reason, slot_candidates(active_slot), latency, throughput_kbps),
                     )
                 if throughput_kbps:
                     last_throughput_status = {
@@ -678,7 +790,7 @@ def run(args):
             candidates = native_candidate_order(candidates)
             refresh_slot_candidate_refs((active_slot, standby_slot), candidates)
             if not slot_alive(standby_slot) or standby_slot.get("failures", 0) >= args.max_failures:
-                rebuild_standby(standby_slot, candidates, active_slot.get("candidate"), args, rules, inject, "candidate check")
+                rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "candidate check")
             delay = random_check_delay(args)
             next_candidate_check = time.monotonic() + delay
             set_status(

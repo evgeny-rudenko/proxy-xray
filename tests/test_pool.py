@@ -28,15 +28,30 @@ def candidate(name, uri, source="subscription", region_score=1, last_ok_at=None,
     }
 
 
+def candidate_with_host(name, uri, host, source="subscription", region_score=1, last_ok_at=None):
+    item = candidate(name, uri, source=source, region_score=region_score, last_ok_at=last_ok_at)
+    item["host"] = host
+    return item
+
+
 class PoolSelectionTest(unittest.TestCase):
-    def test_active_pool_keeps_current_candidate_first(self):
+    def test_single_candidate_active_pool_keeps_current_candidate(self):
+        now = time.time()
+        current = candidate("slow-current", "vless://current", region_score=2, last_ok_at=now)
+        better = candidate("better-extra", "vless://better", source="extra", last_ok_at=now)
+
+        pool = select_active_pool([better, current], active_candidate=current, size=1, now=now)
+
+        self.assertEqual(["vless://current"], [item["uri"] for item in pool])
+
+    def test_multi_candidate_active_pool_uses_score_order(self):
         now = time.time()
         current = candidate("slow-current", "vless://current", region_score=2, last_ok_at=now)
         better = candidate("better-extra", "vless://better", source="extra", last_ok_at=now)
 
         pool = select_active_pool([better, current], active_candidate=current, size=2, now=now)
 
-        self.assertEqual(["vless://current", "vless://better"], [item["uri"] for item in pool])
+        self.assertEqual(["vless://better", "vless://current"], [item["uri"] for item in pool])
 
     def test_standby_pool_excludes_active_pool(self):
         now = time.time()
@@ -80,6 +95,23 @@ class PoolSelectionTest(unittest.TestCase):
         )
 
         self.assertEqual(["vless://healthy"], [item["uri"] for item in pool])
+
+    def test_active_pool_limits_same_host_candidates(self):
+        now = time.time()
+        current = candidate_with_host("extra-0", "vless://extra-0", "same.example.com", source="extra", last_ok_at=now)
+        current["last_fail_at"] = now
+        extra_1 = candidate_with_host("extra-1", "vless://extra-1", "same.example.com", source="extra", last_ok_at=now)
+        extra_2 = candidate_with_host("extra-2", "vless://extra-2", "same.example.com", source="extra", last_ok_at=now)
+        subscription = candidate_with_host("sub-0", "vless://sub-0", "other.example.com", last_ok_at=now)
+
+        pool = select_active_pool(
+            [extra_2, extra_1, subscription, current],
+            active_candidate=current,
+            size=4,
+            now=now,
+        )
+
+        self.assertEqual(["vless://extra-1", "vless://extra-2", "vless://sub-0"], [item["uri"] for item in pool])
 
 
 if __name__ == "__main__":
