@@ -100,7 +100,7 @@ The generated Xray config uses native Xray balancer/observatory inside each runt
 
 The supervisor now prepares two small pools instead of single-candidate slots:
 
-- active pool, `4` candidates by default in compose;
+- active pool, `3` candidates by default in compose;
 - hot standby pool, `3` candidates by default in compose.
 - active and hot standby pools each reserve up to one live candidate from `vless-extra.txt` when available; the rest of the pool is filled from subscription candidates. If only one live extra URI exists, hot standby may reuse it instead of spending another subscription slot.
 
@@ -350,7 +350,8 @@ This avoids exposing the home server to the public internet and avoids GitHub Ac
 
 - Xray balancer information is read through the local RoutingService API for both active and standby slots.
 - `/json` exposes `active_observatory` and `standby_observatory` snapshots with API status, selected outbound, fallback, pool, and raw `xray api bi` output.
+- When a slot health or quality check succeeds, the supervisor records the Xray selected outbound in candidate history and gives it a small recent-selection score bonus. The current Xray API output does not expose per-outbound latency, so selection alone is not treated as a successful health check.
 - `Tested Live Servers` grows gradually because only one random candidate is tested per jitter interval.
-- Xray observatory latency data is not currently normalized into candidate history; only selected/fallback visibility is used.
+- Xray observatory latency data is not currently exposed by `xray api bi`; selected outbound data is normalized into candidate history only after successful slot checks.
 - Throughput checks measure the active shared proxy path, not every candidate.
 - Direct-routing behavior is verified by generated config and smoke access, not by packet capture.

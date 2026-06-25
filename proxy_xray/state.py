@@ -145,6 +145,8 @@ def copy_saved_candidate_fields(candidate, previous):
     candidate["last_throughput_kbps"] = previous.get("last_throughput_kbps")
     candidate["last_ok_at"] = previous.get("last_ok_at")
     candidate["last_fail_at"] = previous.get("last_fail_at")
+    candidate["last_xray_selected_at"] = previous.get("last_xray_selected_at")
+    candidate["last_xray_selected_slot"] = previous.get("last_xray_selected_slot")
     candidate["quarantine_until"] = previous.get("quarantine_until")
     candidate["quarantine_reason"] = previous.get("quarantine_reason")
     candidate["quality"] = previous.get("quality") if isinstance(previous.get("quality"), dict) else {}
@@ -229,6 +231,8 @@ def candidate_record(candidate, previous=None, now=None):
         "last_throughput_kbps": candidate.get("last_throughput_kbps"),
         "last_ok_at": candidate.get("last_ok_at"),
         "last_fail_at": candidate.get("last_fail_at"),
+        "last_xray_selected_at": candidate.get("last_xray_selected_at"),
+        "last_xray_selected_slot": candidate.get("last_xray_selected_slot"),
         "quarantine_until": candidate.get("quarantine_until"),
         "quarantine_reason": candidate.get("quarantine_reason"),
         "recent_checks": previous.get("recent_checks", []),

@@ -19,6 +19,8 @@ def candidate(uri="vless://candidate", last_ok_at=None, last_fail_at=None, laten
         "last_throughput_kbps": None,
         "last_ok_at": last_ok_at,
         "last_fail_at": last_fail_at,
+        "last_xray_selected_at": None,
+        "last_xray_selected_slot": None,
         "quarantine_until": None,
         "quarantine_reason": None,
     }
@@ -83,6 +85,22 @@ class StateTest(unittest.TestCase):
             self.assertEqual(1, record["quality"]["failures"])
             self.assertEqual(1, record["quality"]["consecutive_failures"])
             self.assertEqual(0.5, record["quality"]["success_rate"])
+
+    def test_persist_state_keeps_xray_selection_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "state.json")
+            args = SimpleNamespace(state_file=state_path)
+            selected = candidate(last_ok_at=100.0, latency=0.2)
+            selected["last_xray_selected_at"] = 101.0
+            selected["last_xray_selected_slot"] = "active-a"
+
+            persist_state(args, [selected], active=selected)
+
+            state = load_state(state_path)
+            record = state["candidates"]["vless://candidate"]
+
+            self.assertEqual(101.0, record["last_xray_selected_at"])
+            self.assertEqual("active-a", record["last_xray_selected_slot"])
 
 
 if __name__ == "__main__":

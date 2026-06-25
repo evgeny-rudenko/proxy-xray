@@ -89,6 +89,8 @@ def public_candidate(candidate):
         "last_throughput_kbps": candidate.get("last_throughput_kbps"),
         "last_ok_at": candidate.get("last_ok_at"),
         "last_fail_at": candidate.get("last_fail_at"),
+        "last_xray_selected_at": candidate.get("last_xray_selected_at"),
+        "last_xray_selected_slot": candidate.get("last_xray_selected_slot"),
         "quarantine_until": candidate.get("quarantine_until"),
         "quarantine_reason": candidate.get("quarantine_reason"),
         "quality": candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {},

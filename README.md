@@ -110,7 +110,7 @@ The supervisor starts two Xray instances:
 
 The default compose uses:
 
-- active pool: `4` candidates;
+- active pool: `3` candidates;
 - standby pool: `3` candidates.
 - extra reserve: `1` live private extra URI per active/standby slot when available;
 - hot standby fast switch: `1` full active-path failure when standby is already healthy.

@@ -193,7 +193,7 @@ Xray становится dataplane selector внутри каждого slot'а
 Предлагаемые параметры по умолчанию:
 
 ```text
-active_pool_size = 4
+active_pool_size = 3
 active_pool_min_live = 2
 active_pool_max_subscription = 4
 active_pool_prefer_extra = true
@@ -717,7 +717,7 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 4. Xray API и observatory status
 
-Статус: частично реализовано. Supervisor читает `xray api bi` для active и standby slot, `/json` содержит `active_observatory`/`standby_observatory`, UI показывает selected outbound из Xray API. Нормализация latency observatory в candidate history пока не сделана.
+Статус: реализовано в практическом объеме текущего Xray API. Supervisor читает `xray api bi` для active и standby slot, `/json` содержит `active_observatory`/`standby_observatory`, UI показывает selected outbound из Xray API. Текущий API отдает selected tag без latency, поэтому candidate history обновляется по selected outbound только после успешного slot health/quality check.
 
 Цель: supervisor начинает читать состояние, которое видит Xray.
 
@@ -726,7 +726,7 @@ scripts/deploy-server.sh home --smoke
 - добавить `proxy_xray/xray_api.py`;
 - включить нужные Xray API services в config;
 - читать observatory/routing state по active и standby api ports;
-- обновлять candidate stats по observatory;
+- обновлять candidate stats по observatory selected outbound после успешных slot checks;
 - отображать Xray selected/best outbound в UI.
 
 Почему так:
@@ -883,7 +883,7 @@ scripts/deploy-server.sh home --smoke
 Предварительный список:
 
 ```text
---active-pool-size 4
+--active-pool-size 3
 --active-pool-min-live 2
 --standby-pool-size 3
 --standby-pool-min-live 1

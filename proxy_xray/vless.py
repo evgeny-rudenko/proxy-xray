@@ -401,6 +401,14 @@ def candidate_fallback_score(candidate, now=None):
         score += throughput_bonus
         reasons.append(f"+{throughput_bonus:.0f} throughput")
 
+    last_xray_selected_at = candidate.get("last_xray_selected_at")
+    if last_xray_selected_at:
+        selected_age = max(0.0, now - float(last_xray_selected_at))
+        selected_bonus = 45 * clamp(1.0 - selected_age / 3600)
+        if selected_bonus > 0:
+            score += selected_bonus
+            reasons.append(f"+{selected_bonus:.0f} xray-selected")
+
     quality = candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {}
     success_rate = quality.get("success_rate")
     if success_rate is not None and quality.get("checks", 0) >= 3:

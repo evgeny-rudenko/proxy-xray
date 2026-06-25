@@ -202,8 +202,10 @@ def check_slot(slot, args, record_candidate=True):
     if ok:
         slot["failures"] = 0
         if record_candidate:
-            slot["candidate"]["last_ok_at"] = now
-            slot["candidate"]["last_latency"] = latency
+            selected = record_xray_selected_candidate(slot, args, latency=latency, mark_ok=True)
+            if not selected or selected is slot["candidate"]:
+                slot["candidate"]["last_ok_at"] = now
+                slot["candidate"]["last_latency"] = latency
     else:
         slot["failures"] += 1
         if record_candidate:
@@ -218,8 +220,10 @@ def check_slot_large_download(slot, args):
     ok, throughput_kbps = throughput_check(slot["socks_port"], args.throughput_url, args.throughput_max_time)
     now = time.time()
     if ok and throughput_kbps >= args.throughput_min_kbps:
-        candidate["last_ok_at"] = now
-        candidate["last_throughput_kbps"] = round(throughput_kbps)
+        selected = record_xray_selected_candidate(slot, args, throughput_kbps=throughput_kbps, mark_ok=True)
+        if not selected or selected is candidate:
+            candidate["last_ok_at"] = now
+            candidate["last_throughput_kbps"] = round(throughput_kbps)
         log(
             f"hot standby large download ok {candidate_label(candidate)}: "
             f"{throughput_kbps:.0f} kbps"
@@ -294,6 +298,33 @@ def xray_api_status_for_slot(slot, args):
 
 def active_path_for_slot(slot, args):
     return xray_api_status_for_slot(slot, args)
+
+
+def candidate_by_tag(candidates, tag):
+    for candidate in candidates or []:
+        if candidate.get("tag") == tag:
+            return candidate
+    return None
+
+
+def record_xray_selected_candidate(slot, args, snapshot=None, latency=None, throughput_kbps=None, mark_ok=False):
+    if not slot_alive(slot):
+        return None
+    snapshot = snapshot or xray_api_status_for_slot(slot, args)
+    selected_tag = snapshot.get("selected_tag")
+    candidate = candidate_by_tag(slot_candidates(slot), selected_tag)
+    if not candidate:
+        return None
+    now = time.time()
+    candidate["last_xray_selected_at"] = now
+    candidate["last_xray_selected_slot"] = slot.get("name")
+    if mark_ok:
+        candidate["last_ok_at"] = now
+        if latency is not None:
+            candidate["last_latency"] = latency
+    if throughput_kbps is not None:
+        candidate["last_throughput_kbps"] = round(throughput_kbps)
+    return candidate
 
 
 def set_runtime_status(candidates, args, active_slot, standby_slot):
@@ -556,7 +587,8 @@ def run(args):
                     active_slot["failures"] = 0
                     last_health_status = {"time": time.time(), "status": "ok", "latency": round(latency, 3)}
                     active_slot["last_health"] = last_health_status
-                    if active_slot.get("candidate"):
+                    selected = record_xray_selected_candidate(active_slot, args, latency=latency, mark_ok=True)
+                    if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
                         active_slot["candidate"]["last_ok_at"] = time.time()
                         active_slot["candidate"]["last_latency"] = latency
                     set_status(xray_running=True, last_health=last_health_status)
@@ -622,7 +654,8 @@ def run(args):
                     "status": "ok",
                     "kbps": round(quality_kbps),
                 }
-                if active_slot.get("candidate"):
+                selected = record_xray_selected_candidate(active_slot, args, throughput_kbps=quality_kbps)
+                if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
                     active_slot["candidate"]["last_throughput_kbps"] = round(quality_kbps)
                 set_status(last_quality=last_quality_status)
             else:
@@ -656,7 +689,8 @@ def run(args):
                     "status": "ok",
                     "kbps": round(throughput_kbps),
                 }
-                if active_slot.get("candidate"):
+                selected = record_xray_selected_candidate(active_slot, args, throughput_kbps=throughput_kbps)
+                if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
                     active_slot["candidate"]["last_throughput_kbps"] = round(throughput_kbps)
                 set_status(last_throughput=last_throughput_status)
             else:

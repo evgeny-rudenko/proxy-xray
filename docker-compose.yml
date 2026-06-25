@@ -43,7 +43,7 @@ services:
       - --sub-balancer-strategy
       - "leastPing"
       - --active-pool-size
-      - "4"
+      - "3"
       - --standby-pool-size
       - "3"
       - --pool-extra-reserve-per-slot
