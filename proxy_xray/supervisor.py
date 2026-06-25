@@ -22,6 +22,7 @@ from .vless import (
     standby_candidate,
 )
 from .xray_process import curl_check, start_native_xray, terminate_process, throughput_check
+from .xray_api import balancer_snapshot
 
 
 SLOTS = (
@@ -254,28 +255,52 @@ def slot_public_status(slot):
     }
 
 
-def active_path_for_slot(slot):
+def xray_api_status_for_slot(slot, args):
     candidate = slot.get("candidate")
     selected = public_candidate(candidate) if candidate else None
     candidates = slot_candidates(slot)
-    return {
+    fallback_status = {
         "status": "ok" if slot_alive(slot) else "fail",
-        "detail": "dual-active slot via TCP switch",
+        "detail": "xray api unavailable because slot is not running" if not slot_alive(slot) else "xray api not checked",
         "time": time.time(),
-        "balancer": "hot-standby",
-        "strategy": "active-slot",
+        "slot": slot.get("name"),
+        "api_port": slot.get("api_port"),
+        "balancer": "auto",
+        "strategy": args.balancer_strategy,
         "selected_tag": selected.get("tag") if selected else None,
         "selected": selected,
         "fallback": selected,
+        "selects": [],
         "pool": [public_candidate(candidate) for candidate in candidates],
         "pool_size": len(candidates),
         "raw": "",
     }
+    if not slot_alive(slot):
+        return fallback_status
+    try:
+        snapshot = balancer_snapshot(candidates, args, api_port=slot["api_port"])
+    except Exception as exc:
+        fallback_status["status"] = "fail"
+        fallback_status["detail"] = f"xray api failed: {exc}"
+        return fallback_status
+    snapshot["slot"] = slot.get("name")
+    snapshot["pool"] = [public_candidate(candidate) for candidate in candidates]
+    snapshot["pool_size"] = len(candidates)
+    if not snapshot.get("selected"):
+        snapshot["selected"] = snapshot.get("fallback")
+        snapshot["selected_tag"] = (snapshot.get("fallback") or {}).get("tag")
+    return snapshot
+
+
+def active_path_for_slot(slot, args):
+    return xray_api_status_for_slot(slot, args)
 
 
 def set_runtime_status(candidates, args, active_slot, standby_slot):
     active_pool = slot_candidates(active_slot)
     standby_pool = slot_candidates(standby_slot)
+    active_api = xray_api_status_for_slot(active_slot, args)
+    standby_api = xray_api_status_for_slot(standby_slot, args)
     set_status(
         **status_candidate_fields(candidates, args.standby_max_age),
         xray_running=slot_alive(active_slot),
@@ -283,7 +308,9 @@ def set_runtime_status(candidates, args, active_slot, standby_slot):
         active_backend=slot_public_status(active_slot),
         standby_pool=[public_candidate(candidate) for candidate in standby_pool],
         hot_standby=slot_public_status(standby_slot),
-        active_path=active_path_for_slot(active_slot),
+        active_path=active_api,
+        active_observatory=active_api,
+        standby_observatory=standby_api,
     )
 
 
@@ -604,7 +631,13 @@ def run(args):
             next_diagnostics_check = time.monotonic() + args.check_interval
 
         if args.active_path_interval > 0 and now >= next_active_path_check:
-            set_status(active_path=active_path_for_slot(active_slot))
+            active_api = xray_api_status_for_slot(active_slot, args)
+            standby_api = xray_api_status_for_slot(standby_slot, args)
+            set_status(
+                active_path=active_api,
+                active_observatory=active_api,
+                standby_observatory=standby_api,
+            )
             next_active_path_check = time.monotonic() + args.active_path_interval
 
         failover_reason = None
@@ -724,6 +757,8 @@ def run(args):
                 )
                 persist_state(args, candidates, active=active_slot.get("candidate"))
                 switch_cooldown_until = time.monotonic() + args.failover_cooldown
+                active_api = xray_api_status_for_slot(active_slot, args)
+                standby_api = xray_api_status_for_slot(standby_slot, args)
                 set_status(
                     **status_candidate_fields(candidates, args.standby_max_age),
                     xray_running=slot_alive(active_slot),
@@ -735,7 +770,9 @@ def run(args):
                     active_backend=slot_public_status(active_slot),
                     standby_pool=[public_candidate(candidate) for candidate in slot_candidates(standby_slot)],
                     hot_standby=slot_public_status(standby_slot),
-                    active_path=active_path_for_slot(active_slot),
+                    active_path=active_api,
+                    active_observatory=active_api,
+                    standby_observatory=standby_api,
                     last_switch={
                         "time": time.time(),
                         "reason": failover_reason,

@@ -322,8 +322,10 @@ def render_status_html():
     active_backend = snapshot.get("active_backend") or {}
     hot_standby = snapshot.get("hot_standby") or {}
     active_path = snapshot.get("active_path") or {}
+    standby_observatory = snapshot.get("standby_observatory") or {}
     assets = snapshot.get("assets") or {}
     active_selected = active_path.get("selected") or {}
+    standby_selected = standby_observatory.get("selected") or {}
     last_throughput = snapshot.get("last_throughput") or {}
     sources = snapshot.get("sources") or {}
     tested_live = snapshot.get("tested_live_candidates") or []
@@ -332,17 +334,18 @@ def render_status_html():
     subscription_fetch = snapshot.get("subscription_fetch") or {}
     active_backend_candidate = active_backend.get("candidate") or {}
     hot_standby_candidate = hot_standby.get("candidate") or {}
-    current = active_backend_candidate or active_selected or fallback
+    current = active_selected or active_backend_candidate or fallback
     current_tag = active_path.get("selected_tag") or current.get("tag") or "-"
     current_endpoint = endpoint_text(current)
     current_transport = f"{current.get('network') or '-'} / {current.get('security') or '-'}"
-    standby_display = hot_standby_candidate or standby
+    standby_display = standby_selected or hot_standby_candidate or standby
     standby_endpoint = endpoint_text(standby_display) if standby_display else "-"
     active_pool_size = active_backend.get("pool_size") or active_path.get("pool_size") or len(snapshot.get("active_pool") or [])
     standby_pool_size = hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or [])
     xray_chip_class = "ok" if active_backend.get("running", snapshot.get("xray_running")) else "fail"
     xray_chip_text = "running" if active_backend.get("running", snapshot.get("xray_running")) else "stopped"
     hot_chip_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
+    api_chip_class = "ok" if active_path.get("status") == "ok" else "warn"
     if counts.get("fail", 0):
         ring_class = "fail"
         ring_value = counts.get("fail", 0)
@@ -534,6 +537,7 @@ def render_status_html():
       </div>
       <div class="chips">
         <span class="chip {xray_chip_class}">{xray_chip_text}</span>
+        <span class="chip {api_chip_class}">api {html.escape(str(active_path.get('status') or '-'))}</span>
         <span class="chip blue">balancer {html.escape(str(active_path.get('strategy') or '-'))}</span>
         <span class="chip blue">active pool {active_pool_size}</span>
         <span class="chip {hot_chip_class}">hot {html.escape(str(hot_standby_candidate.get('tag') or '-'))}</span>
@@ -542,8 +546,8 @@ def render_status_html():
       <div class="connection-grid">
         <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>
         <div class="mini-metric"><div class="label">Latency</div><div class="metric-value">{html.escape(format_metric(current.get('last_latency'), 's'))}</div><div class="metric-note">last OK</div></div>
-        <div class="mini-metric"><div class="label">Hot standby</div><div class="metric-value">{html.escape(str(hot_standby_candidate.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
-        <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(hot_standby_candidate))}</div><div class="metric-note">{html.escape(score_reasons(hot_standby_candidate))}</div></div>
+        <div class="mini-metric"><div class="label">Hot selected</div><div class="metric-value">{html.escape(str(standby_display.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
+        <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(standby_display))}</div><div class="metric-note">{html.escape(score_reasons(standby_display))}</div></div>
       </div>
     </aside>
   </section>

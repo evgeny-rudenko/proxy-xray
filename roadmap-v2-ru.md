@@ -713,6 +713,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 4. Xray API и observatory status
 
+Статус: частично реализовано. Supervisor читает `xray api bi` для active и standby slot, `/json` содержит `active_observatory`/`standby_observatory`, UI показывает selected outbound из Xray API. Нормализация latency observatory в candidate history пока не сделана.
+
 Цель: supervisor начинает читать состояние, которое видит Xray.
 
 Работы:

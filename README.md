@@ -196,7 +196,8 @@ The dashboard shows:
 - health indicators;
 - current connection;
 - hot standby;
-- active path;
+- active path selected by Xray balancer API;
+- active and standby observatory snapshots in `/json`;
 - candidate scores;
 - throughput;
 - subscription state;

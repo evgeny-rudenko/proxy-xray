@@ -94,8 +94,12 @@ echo "${status_json}" | jq -e '.routing.direct_domains | index("geosite:category
     || fail "geosite:category-ru is not configured as direct"
 echo "${status_json}" | jq -e '.routing.direct_ips | index("geoip:ru")' >/dev/null \
     || fail "geoip:ru is not configured as direct"
-echo "${status_json}" | jq -e '.active_path == null or (.active_path.balancer == "hot-standby" and (.active_path.status | type == "string"))' >/dev/null \
+echo "${status_json}" | jq -e '.active_path == null or (.active_path.balancer == "auto" and (.active_path.status | type == "string"))' >/dev/null \
     || fail "active_path status is invalid"
+echo "${status_json}" | jq -e '.active_observatory == null or (.active_observatory.api_port | type == "number" and (.active_observatory.status | type == "string"))' >/dev/null \
+    || fail "active_observatory status is invalid"
+echo "${status_json}" | jq -e '.standby_observatory == null or (.standby_observatory.api_port | type == "number" and (.standby_observatory.status | type == "string"))' >/dev/null \
+    || fail "standby_observatory status is invalid"
 echo "${status_json}" | jq -e '.assets.items.geoip.status == "ok" and .assets.items.geosite.status == "ok"' >/dev/null \
     || fail "geo assets status is not ok"
 echo "${status_json}" | jq -e '.assets.items.geoip.size > 1000000 and .assets.items.geosite.size > 1000000' >/dev/null \

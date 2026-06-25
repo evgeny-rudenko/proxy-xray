@@ -340,8 +340,9 @@ This avoids exposing the home server to the public internet and avoids GitHub Ac
 
 ## Known Limitations
 
-- Xray balancer information is read through the local RoutingService API, but exact selected outbound visibility depends on what `xray api bi` exposes for the active strategy.
+- Xray balancer information is read through the local RoutingService API for both active and standby slots.
+- `/json` exposes `active_observatory` and `standby_observatory` snapshots with API status, selected outbound, fallback, pool, and raw `xray api bi` output.
 - `Tested Live Servers` grows gradually because only one random candidate is tested per jitter interval.
-- Xray observatory latency data is not currently normalized into the status model.
+- Xray observatory latency data is not currently normalized into candidate history; only selected/fallback visibility is used.
 - Throughput checks measure the active shared proxy path, not every candidate.
 - Direct-routing behavior is verified by generated config and smoke access, not by packet capture.
