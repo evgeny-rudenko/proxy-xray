@@ -13,14 +13,10 @@ from .tcp_switch import set_switch_targets, start_switches, stop_switches
 from .telegram import native_recovery_message, send_telegram_notification
 from .util import load_json_file
 from .vless import (
-    candidate_is_quarantined,
-    candidate_is_preferred_region,
     clear_expired_quarantine,
     native_candidate_order,
-    primary_candidate,
     promote_candidate,
     quarantine_candidate,
-    standby_candidate,
 )
 from .xray_process import curl_check, start_native_xray, terminate_process, throughput_check
 from .xray_api import balancer_snapshot
@@ -123,28 +119,6 @@ def refresh_slot_candidate_refs(slots, candidates):
         if candidate:
             slot["candidates"] = [candidate]
             slot["candidate"] = candidate
-
-
-def select_standby_candidate(candidates, active_candidate, args):
-    clear_expired_quarantine(candidates)
-    standby = standby_candidate(candidates, primary=active_candidate, max_age=args.standby_max_age)
-    if standby:
-        return standby, "fresh tested standby"
-    standby = standby_candidate(candidates, primary=active_candidate, max_age=0)
-    if standby:
-        return standby, "last-known-good standby"
-    active_uri = active_candidate.get("uri") if active_candidate else None
-    ordered = native_candidate_order(candidates)
-    for preferred_only in (True, False):
-        for candidate in ordered:
-            if preferred_only and not candidate_is_preferred_region(candidate):
-                continue
-            if candidate.get("uri") == active_uri:
-                continue
-            if candidate_is_quarantined(candidate):
-                continue
-            return candidate, "cold standby"
-    return None, "none"
 
 
 def candidate_label(candidate):
@@ -351,7 +325,6 @@ def rebuild_standby(standby_slot, candidates, active_pool, args, rules, inject, 
     pool = select_standby_pool(
         candidates,
         active_pool=active_pool,
-        standby_candidate=standby_slot.get("candidate"),
         size=getattr(args, "standby_pool_size", 1),
         max_age=args.standby_max_age,
         extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
@@ -383,7 +356,6 @@ def start_active_with_preflight(active_slot, candidates, args, rules, inject, re
     for attempt in range(max(1, attempt_count)):
         pool = select_active_pool(
             candidates,
-            active_candidate=primary_candidate(candidates),
             size=getattr(args, "active_pool_size", 1),
             extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
             extra_require_live=getattr(args, "pool_extra_require_live", True),
@@ -450,7 +422,6 @@ def run(args):
             active_slot,
             select_active_pool(
                 candidates,
-                active_candidate=primary_candidate(candidates),
                 size=args.active_pool_size,
                 extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
                 extra_require_live=getattr(args, "pool_extra_require_live", True),

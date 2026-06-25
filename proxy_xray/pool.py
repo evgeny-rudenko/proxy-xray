@@ -20,7 +20,7 @@ def extra_candidate_uris(candidates):
     return {candidate_uri(candidate) for candidate in candidates if candidate.get("source") == "extra" and candidate_uri(candidate)}
 
 
-def normalize_pool_size(size, default=1):
+def normalize_pool_size(size, default=3):
     try:
         value = int(size)
     except (TypeError, ValueError):
@@ -42,17 +42,6 @@ def increment_host_count(host_counts, candidate):
     host = candidate_host(candidate)
     if host:
         host_counts[host] = host_counts.get(host, 0) + 1
-
-
-def append_seed(result, seen_uris, host_counts, seed):
-    uri = candidate_uri(seed)
-    if not seed or not uri or uri in seen_uris:
-        return
-    if candidate_is_quarantined(seed):
-        return
-    result.append(seed)
-    seen_uris.add(uri)
-    increment_host_count(host_counts, seed)
 
 
 def select_extra_reserve(
@@ -92,7 +81,7 @@ def select_extra_reserve(
 
 def select_candidate_pool(
     candidates,
-    size=1,
+    size=3,
     exclude_uris=None,
     live_only=False,
     max_age=0,
@@ -133,8 +122,7 @@ def select_candidate_pool(
 
 def select_active_pool(
     candidates,
-    active_candidate=None,
-    size=1,
+    size=3,
     extra_reserve_per_slot=0,
     extra_require_live=True,
     extra_max_age=0,
@@ -145,10 +133,6 @@ def select_active_pool(
     result = []
     seen_uris = set()
     host_counts = {}
-    if size == 1:
-        append_seed(result, seen_uris, host_counts, active_candidate)
-    if len(result) >= size:
-        return result[:size]
     extra_reserve = select_extra_reserve(
         candidates,
         seen_uris,
@@ -180,8 +164,7 @@ def select_active_pool(
 def select_standby_pool(
     candidates,
     active_pool=None,
-    standby_candidate=None,
-    size=1,
+    size=3,
     max_age=600,
     extra_reserve_per_slot=0,
     extra_require_live=True,
@@ -200,9 +183,6 @@ def select_standby_pool(
     seen_uris = set(excluded)
     host_counts = {}
 
-    append_seed(result, seen_uris, host_counts, standby_candidate)
-    if len(result) >= size:
-        return result[:size]
     extra_reserve = select_extra_reserve(
         candidates,
         seen_uris,

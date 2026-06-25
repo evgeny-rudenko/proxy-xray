@@ -35,21 +35,12 @@ def candidate_with_host(name, uri, host, source="subscription", region_score=1, 
 
 
 class PoolSelectionTest(unittest.TestCase):
-    def test_single_candidate_active_pool_keeps_current_candidate(self):
-        now = time.time()
-        current = candidate("slow-current", "vless://current", region_score=2, last_ok_at=now)
-        better = candidate("better-extra", "vless://better", source="extra", last_ok_at=now)
-
-        pool = select_active_pool([better, current], active_candidate=current, size=1, now=now)
-
-        self.assertEqual(["vless://current"], [item["uri"] for item in pool])
-
     def test_multi_candidate_active_pool_uses_score_order(self):
         now = time.time()
         current = candidate("slow-current", "vless://current", region_score=2, last_ok_at=now)
         better = candidate("better-extra", "vless://better", source="extra", last_ok_at=now)
 
-        pool = select_active_pool([better, current], active_candidate=current, size=2, now=now)
+        pool = select_active_pool([better, current], size=2, now=now)
 
         self.assertEqual(["vless://better", "vless://current"], [item["uri"] for item in pool])
 
@@ -106,7 +97,6 @@ class PoolSelectionTest(unittest.TestCase):
 
         pool = select_active_pool(
             [extra_2, extra_1, subscription, current],
-            active_candidate=current,
             size=4,
             now=now,
         )

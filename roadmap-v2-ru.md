@@ -839,6 +839,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 9. Deploy profiles и rollback
 
+Статус: отложено в самый конец. Текущий сценарий эксплуатации - один раз развернуть на домашнем сервере и не трогать, пока работает.
+
 Цель: сделать обновления безопасными.
 
 Работы:
@@ -860,6 +862,8 @@ scripts/deploy-server.sh home --smoke
 - server runtime files не затираются.
 
 ### Этап 10. Удаление старой single-candidate логики
+
+Статус: реализовано. Pool mode стал единственным дефолтным режимом: active/standby pool size по умолчанию `3`, удалена single-candidate seed-ветка в pool selection, убраны верхнеуровневые `/json` поля `fallback`/`standby`, удалена старая `/legacy` страница, smoke-тесты переведены на active/hot pool status.
 
 Цель: после стабилизации v2 убрать лишние ветки.
 

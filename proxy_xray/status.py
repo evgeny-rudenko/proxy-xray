@@ -25,7 +25,6 @@ STATUS = {
     "xray_running": False,
     "candidates_count": 0,
     "sources": {},
-    "fallback": None,
     "active_pool": [],
     "active_path": None,
     "active_observatory": None,
@@ -46,7 +45,6 @@ STATUS = {
     "last_candidate_check": None,
     "next_candidate_check_at": None,
     "candidate_checker": {"enabled": False, "min_interval": None, "max_interval": None},
-    "standby": None,
     "standby_policy": {"max_age": None, "cooldown": None, "quarantine_duration": None},
     "switch_cooldown_until": None,
     "failover_state": {
@@ -119,14 +117,10 @@ def status_candidate_fields(candidates, standby_max_age=600):
         apply_fallback_scores,
         assign_candidate_tags,
         candidate_is_quarantined,
-        primary_candidate,
-        standby_candidate,
     )
 
     assign_candidate_tags(candidates)
     apply_fallback_scores(candidates)
-    primary = primary_candidate(candidates)
-    standby = standby_candidate(candidates, primary=primary, max_age=standby_max_age)
     tested_live = [
         public_candidate(candidate)
         for candidate in candidates
@@ -148,8 +142,6 @@ def status_candidate_fields(candidates, standby_max_age=600):
     return {
         "candidates_count": len(candidates),
         "sources": dict(Counter(candidate.get("source") for candidate in candidates)),
-        "fallback": public_candidate(primary) if primary else None,
-        "standby": public_candidate(standby) if standby else None,
         "quarantine_count": sum(1 for candidate in candidates if candidate_is_quarantined(candidate)),
         "tested_live_candidates": tested_live,
         "candidates": [public_candidate(candidate) for candidate in candidates],

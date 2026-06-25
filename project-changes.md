@@ -100,13 +100,13 @@ The generated Xray config uses native Xray balancer/observatory inside each runt
 
 The supervisor now prepares two small pools instead of single-candidate slots:
 
-- active pool, `3` candidates by default in compose;
-- hot standby pool, `3` candidates by default in compose.
+- active pool, `3` candidates by default;
+- hot standby pool, `3` candidates by default.
 - active and hot standby pools each reserve up to one live candidate from `vless-extra.txt` when available; the rest of the pool is filled from subscription candidates. If only one live extra URI exists, hot standby may reuse it instead of spending another subscription slot.
 
 The active pool receives public traffic through the stable TCP switches. The standby pool runs in a second Xray process and remains ready for slot-level failover.
 
-Startup now performs an active-slot preflight check before attaching public ports. A dead fallback candidate is soft-quarantined and another active pool is tried. During runtime, a healthy hot standby can be promoted after the first full active-path failure, so the system does not wait for several public timeout cycles when a ready standby path already exists.
+Startup now performs an active-slot preflight check before attaching public ports. A dead pool head is soft-quarantined and another active pool is tried. During runtime, a healthy hot standby can be promoted after the first full active-path failure, so the system does not wait for several public timeout cycles when a ready standby path already exists.
 
 Candidates with a recent successful per-candidate check are sorted first. This makes the native fallback prefer a known live server after Xray restart/failover while observatory probes catch up.
 
@@ -280,7 +280,7 @@ The HTML page currently shows:
 - last random candidate test result;
 - source counts;
 - active path from Xray's local balancer API when available;
-- fallback;
+- current selected outbound, active pool, and hot standby pool;
 - split health indicators for Xray, SOCKS, HTTP, LAN VLESS, throughput, direct internet, subscription, RU DNS, global DNS, and Telegram API;
 - tested live servers;
 - logs;

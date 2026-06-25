@@ -74,3 +74,21 @@
 - проверены build, startup, status endpoint, SOCKS, HTTP, LAN VLESS, split DNS, RU direct routing и geo assets.
 
 Так код и Docker image теперь соответствуют только тому режиму, который реально используется на домашнем сервере.
+
+## 5. V2 pool mode без single-candidate runtime/API
+
+Завершено: 2026-06-25.
+
+После стабилизации v2 удалены остатки старой single-candidate модели вокруг active/standby slots.
+
+Реализовано:
+
+- active и hot standby pool теперь имеют дефолтный размер `3`;
+- удалена ветка pool selection, которая при `size=1` принудительно держала текущий single candidate;
+- standby pool больше не seed'ится отдельным single standby candidate;
+- `/json` больше не публикует верхнеуровневые поля `fallback` и `standby`;
+- status UI использует active backend, active pool, hot standby и observatory snapshots;
+- удалена старая `/legacy` status page;
+- smoke-тесты переведены на pool-based status fields.
+
+Внутри Xray config остается native `fallbackTag`: это штатный fallback первого outbound внутри pool, а не отдельный старый runtime mode.

@@ -421,8 +421,6 @@ def render_diagnostics_html(args):
 
 def render_status_html():
     snapshot = status_snapshot()
-    fallback = snapshot.get("fallback") or {}
-    standby = snapshot.get("standby") or {}
     active_backend = snapshot.get("active_backend") or {}
     hot_standby = snapshot.get("hot_standby") or {}
     active_path = snapshot.get("active_path") or {}
@@ -439,11 +437,11 @@ def render_status_html():
     subscription_fetch = snapshot.get("subscription_fetch") or {}
     active_backend_candidate = active_backend.get("candidate") or {}
     hot_standby_candidate = hot_standby.get("candidate") or {}
-    current = active_selected or active_backend_candidate or fallback
+    current = active_selected or active_backend_candidate or ((snapshot.get("active_pool") or [{}])[0])
     current_tag = active_path.get("selected_tag") or current.get("tag") or "-"
     current_endpoint = endpoint_text(current)
     current_transport = f"{current.get('network') or '-'} / {current.get('security') or '-'}"
-    standby_display = standby_selected or hot_standby_candidate or standby
+    standby_display = standby_selected or hot_standby_candidate or ((snapshot.get("standby_pool") or [{}])[0])
     standby_endpoint = endpoint_text(standby_display) if standby_display else "-"
     active_pool_size = active_backend.get("pool_size") or active_path.get("pool_size") or len(snapshot.get("active_pool") or [])
     standby_pool_size = hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or [])
@@ -452,6 +450,7 @@ def render_status_html():
     hot_chip_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
     api_chip_class = "ok" if active_path.get("status") == "ok" else "warn"
     failover_note = failover.get("reason") or f"cooldown {failover.get('cooldown_remaining', 0)}s"
+    switch_guard_remaining = int(failover.get("cooldown_remaining") or 0)
     if counts.get("fail", 0):
         ring_class = "fail"
         ring_value = counts.get("fail", 0)
@@ -615,7 +614,6 @@ def render_status_html():
       <a class="icon-button" href="/json" title="Open JSON">J</a>
       <a class="icon-button" href="/logs" title="Open logs">L</a>
       <a class="icon-button" href="/diagnostics" title="Diagnostics">D</a>
-      <a class="button-link" href="/legacy">Old version</a>
     </div>
   </header>
 
@@ -653,8 +651,9 @@ def render_status_html():
       <div class="connection-grid">
         <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>
         <div class="mini-metric"><div class="label">Latency</div><div class="metric-value">{html.escape(format_metric(current.get('last_latency'), 's'))}</div><div class="metric-note">last OK</div></div>
-        <div class="mini-metric"><div class="label">Hot selected</div><div class="metric-value">{html.escape(str(standby_display.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
+        <div class="mini-metric"><div class="label">Hot standby</div><div class="metric-value">{html.escape(str(standby_display.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
         <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(standby_display))}</div><div class="metric-note">{html.escape(score_reasons(standby_display))}</div></div>
+        <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{switch_guard_remaining}s</div><div class="metric-note">cooldown window</div></div>
       </div>
     </aside>
   </section>
@@ -752,7 +751,7 @@ def render_servers_html(kind):
       <h1>{html.escape(title)}</h1>
       <div class="muted">{len(selected)} rows · {html.escape(timezone_label())}</div>
     </div>
-    <div class="actions"><a class="button" href="/">Status</a><a class="button" href="/legacy">Old version</a><a class="button" href="/json">JSON</a></div>
+    <div class="actions"><a class="button" href="/">Status</a><a class="button" href="/json">JSON</a><a class="button" href="/diagnostics">Diagnostics</a></div>
   </div>
   <section class="panel">
     <div class="panel-head">
@@ -763,134 +762,6 @@ def render_servers_html(kind):
       <table><thead><tr><th>Score</th><th>Server</th><th>Endpoint</th><th>Transport</th><th>Latency</th><th>Last OK</th></tr></thead><tbody>{modern_server_rows(selected)}</tbody></table>
     </div>
   </section>
-</main>
-</body>
-</html>"""
-    return body.encode("utf-8")
-
-
-def render_legacy_status_html():
-    snapshot = status_snapshot()
-    fallback = snapshot.get("fallback") or {}
-    active_path = snapshot.get("active_path") or {}
-    assets = snapshot.get("assets") or {}
-    active_selected = active_path.get("selected") or {}
-    active_fallback = active_path.get("fallback") or fallback
-    last_health = snapshot.get("last_health") or {}
-    last_throughput = snapshot.get("last_throughput") or {}
-    failover = snapshot.get("failover_state") or {}
-    last_candidate_check = snapshot.get("last_candidate_check") or {}
-    sources = snapshot.get("sources") or {}
-    tested_live = snapshot.get("tested_live_candidates") or []
-    all_candidates = snapshot.get("candidates") or []
-    health_checks = snapshot.get("health_checks") or {}
-    counts = health_counts(health_checks)
-    subscription_fetch = snapshot.get("subscription_fetch") or {}
-    log_lines = "\n".join(
-        f"{format_time(item.get('time'))} {item.get('line', '')}" for item in snapshot.get("logs", [])[-120:]
-    )
-    body = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="15">
-  <title>proxy-xray status</title>
-  <style>
-    :root {{ color-scheme: light; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f6f7; color: #17202a; }}
-    main {{ margin: 0 auto; max-width: 1480px; padding: 22px; }}
-    h1 {{ font-size: 24px; margin: 0; }}
-    h2 {{ font-size: 18px; margin: 26px 0 10px; }}
-    .topbar {{ display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 16px; }}
-    .links {{ font-size: 13px; white-space: nowrap; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 10px; }}
-    .box {{ background: #fff; border: 1px solid #d9dde3; border-radius: 6px; padding: 12px; }}
-    .label {{ color: #687382; font-size: 12px; text-transform: uppercase; }}
-    .value {{ font-size: 18px; margin-top: 4px; overflow-wrap: anywhere; }}
-    .muted {{ color: #687382; font-size: 13px; }}
-    .health-summary {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }}
-    .pill {{ border-radius: 999px; padding: 3px 9px; font-size: 12px; border: 1px solid #d9dde3; background: #fff; }}
-    .pill.ok {{ color: #17633a; border-color: #b9dfca; background: #effaf3; }}
-    .pill.warn {{ color: #7a4b00; border-color: #f1d39b; background: #fff7e6; }}
-    .pill.fail {{ color: #8c1d18; border-color: #efb4ae; background: #fff0ee; }}
-    .pill.unknown {{ color: #56606c; border-color: #d9dde3; background: #f8f9fa; }}
-    .health-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }}
-    .health-card {{ background: #fff; border: 1px solid #d9dde3; border-left-width: 5px; border-radius: 6px; padding: 11px 12px; min-height: 82px; }}
-    .health-card.ok {{ border-left-color: #2e8b57; }}
-    .health-card.warn {{ border-left-color: #d18b00; }}
-    .health-card.fail {{ border-left-color: #d6453d; }}
-    .health-card.unknown {{ border-left-color: #9aa3ad; }}
-    .health-top {{ display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }}
-    .health-top strong {{ font-size: 12px; letter-spacing: 0; }}
-    .health-detail {{ color: #384250; font-size: 13px; margin-top: 8px; overflow-wrap: anywhere; }}
-    .health-latency {{ color: #687382; font-size: 12px; margin-top: 4px; }}
-    .table-wrap {{ overflow-x: auto; border: 1px solid #d9dde3; background: #fff; }}
-    table {{ width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d9dde3; }}
-    .table-wrap table {{ border: 0; min-width: 900px; }}
-    th, td {{ text-align: left; padding: 7px 9px; border-bottom: 1px solid #e6e9ee; font-size: 13px; vertical-align: top; }}
-    th {{ background: #eef1f4; }}
-    pre {{ background: #111820; color: #d8dee9; padding: 12px; border-radius: 6px; overflow: auto; max-height: 520px; }}
-    a {{ color: #005ea8; }}
-    @media (max-width: 720px) {{
-      main {{ padding: 14px; }}
-      .topbar {{ align-items: flex-start; flex-direction: column; }}
-      .links {{ white-space: normal; }}
-    }}
-  </style>
-</head>
-<body>
-<main>
-  <div class="topbar">
-    <div>
-      <h1>proxy-xray status</h1>
-      <div class="muted">Auto-refresh every 15 seconds · {html.escape(timezone_label())}</div>
-    </div>
-    <div class="links"><a href="/json">JSON</a> · <a href="/diagnostics">Diagnostics</a> · <a href="/logs">Plain logs</a></div>
-  </div>
-  <h2>Overview</h2>
-  <div class="grid">
-    <div class="box"><div class="label">Xray</div><div class="value">{'running' if snapshot.get('xray_running') else 'stopped'}</div></div>
-    <div class="box"><div class="label">Candidates</div><div class="value">{snapshot.get('candidates_count', 0)}</div></div>
-    <div class="box"><div class="label">Tested Live</div><div class="value">{len(tested_live)}</div></div>
-    <div class="box"><div class="label">Active Path</div><div class="value">{html.escape(str(active_path.get('selected_tag') or active_path.get('balancer') or '-'))}<br>{html.escape(endpoint_text(active_selected) if active_selected else str(active_path.get('strategy') or ''))}</div></div>
-    <div class="box"><div class="label">Subscription OK</div><div class="value">{html.escape(format_time(snapshot.get('last_subscription_success_at')))}</div></div>
-    <div class="box"><div class="label">Geo Assets OK</div><div class="value">{html.escape(format_time(assets.get('last_success_at')))}<br>{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</div></div>
-    <div class="box"><div class="label">Subscription Fetch</div><div class="value">{html.escape(str(subscription_fetch.get('last_method') or '-'))}<br>{html.escape(str(subscription_fetch.get('mode') or '-'))}</div></div>
-    <div class="box"><div class="label">Next Test</div><div class="value">{html.escape(format_time(snapshot.get('next_candidate_check_at')))}</div></div>
-    <div class="box"><div class="label">Last Test</div><div class="value">{html.escape(str(last_candidate_check.get('status') or '-'))}<br>{html.escape(str(last_candidate_check.get('tag') or ''))}</div></div>
-    <div class="box"><div class="label">Sources</div><div class="value">extra {sources.get('extra', 0)} / sub {sources.get('subscription', 0)}</div></div>
-    <div class="box"><div class="label">Fallback</div><div class="value">{html.escape(str(fallback.get('tag') or '-'))}<br>{html.escape(str(fallback.get('host') or ''))}</div></div>
-    <div class="box"><div class="label">Health</div><div class="value">{html.escape(str(last_health.get('status') or '-'))} {html.escape(str(last_health.get('latency') or ''))}</div></div>
-    <div class="box"><div class="label">Throughput</div><div class="value">{html.escape(str(last_throughput.get('status') or '-'))} {html.escape(str(last_throughput.get('kbps') or ''))} kbps</div></div>
-    <div class="box"><div class="label">Failover State</div><div class="value">{html.escape(str(failover.get('state') or 'idle'))}<br>{html.escape(str(failover.get('reason') or failover.get('kind') or '-'))}</div></div>
-  </div>
-  <h2>Active Path</h2>
-  <div class="grid">
-    <div class="box"><div class="label">Balancer</div><div class="value">{html.escape(str(active_path.get('balancer') or '-'))}<br>{html.escape(str(active_path.get('strategy') or '-'))}</div></div>
-    <div class="box"><div class="label">Selected</div><div class="value">{html.escape(str(active_path.get('selected_tag') or '-'))}<br>{html.escape(endpoint_text(active_selected))}</div></div>
-    <div class="box"><div class="label">Fallback</div><div class="value">{html.escape(str(active_fallback.get('tag') or '-'))}<br>{html.escape(endpoint_text(active_fallback))}</div></div>
-    <div class="box"><div class="label">API Status</div><div class="value">{html.escape(str(active_path.get('status') or '-'))}<br>{html.escape(str(active_path.get('detail') or '-'))}</div></div>
-  </div>
-  <h2>Health Indicators</h2>
-  <div class="health-summary">
-    <span class="pill ok">OK {counts.get('ok', 0)}</span>
-    <span class="pill warn">WARN {counts.get('warn', 0)}</span>
-    <span class="pill fail">FAIL {counts.get('fail', 0)}</span>
-    <span class="pill unknown">UNKNOWN {counts.get('unknown', 0)}</span>
-    <span class="pill">Updated {html.escape(format_time(snapshot.get('last_health_checks_at')))}</span>
-  </div>
-  <div class="health-grid">{render_health_grid(health_checks)}</div>
-  <h2>Geo Assets</h2>
-  <p class="muted">LoyalSoldier geoip/geosite files used by Xray. Last downloaded means the last successful runtime refresh into the persistent asset folder.</p>
-  {assets_table(assets)}
-  <h2>Tested Live Servers</h2>
-  <p class="muted">Servers with a successful per-candidate check, sorted by fallback score.</p>
-  {candidate_table(tested_live, "No tested live servers yet")}
-  <h2>Logs</h2>
-  <pre>{html.escape(log_lines)}</pre>
-  <h2>All Candidates</h2>
-  {candidate_table(all_candidates, "No candidates")}
 </main>
 </body>
 </html>"""
@@ -919,9 +790,6 @@ class StatusHandler(BaseHTTPRequestHandler):
         if self.path == "/diagnostics.json":
             data = json.dumps(build_diagnostics(args), ensure_ascii=False, indent=2).encode("utf-8")
             self.send_bytes(data, "application/json; charset=utf-8")
-            return
-        if self.path == "/legacy":
-            self.send_bytes(render_legacy_status_html(), "text/html; charset=utf-8")
             return
         if self.path == "/servers/live":
             self.send_bytes(render_servers_html("live"), "text/html; charset=utf-8")

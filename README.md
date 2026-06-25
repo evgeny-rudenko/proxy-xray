@@ -118,7 +118,7 @@ The default compose uses:
 - quality download: every `60` seconds, 512 KB, failover after `2` slow checks;
 - heavy throughput: every `300` seconds, used as a quality metric by default.
 
-Each slot still has a score-ordered fallback candidate, but Xray can choose between several outbounds inside the slot.
+Each slot has a score-ordered pool. Xray can choose between several outbounds inside the slot, and the first outbound remains the native Xray fallback if observatory cannot choose one.
 
 Failover can be triggered by:
 
@@ -130,14 +130,14 @@ Failover can be triggered by:
 On successful switch:
 
 1. Public ports are pointed to the standby slot.
-2. The previous active fallback candidate is soft-quarantined.
+2. The previous active pool head is soft-quarantined.
 3. A new standby is built.
 4. `state.json` is updated.
 5. Telegram notification is sent if configured.
 
 Candidate checks are intentionally sequential. One random candidate is tested every 2-5 minutes by default, with extra-list servers weighted higher. This avoids hammering a subscription with many concurrent VLESS connections.
 
-At startup the active slot must pass a preflight health check before public ports are attached to it. If the first fallback in the pool is dead, it is soft-quarantined and another pool is tried.
+At startup the active slot must pass a preflight health check before public ports are attached to it. If the first outbound in the pool is dead, it is soft-quarantined and another pool is tried.
 
 ## State File
 
@@ -183,7 +183,6 @@ The image seeds bundled assets. Runtime refresh happens on schedule, but compose
 Available endpoints:
 
 - `/` - HTML dashboard.
-- `/legacy` - older compact dashboard.
 - `/servers/live` - tested live servers.
 - `/servers/all` - all candidates.
 - `/json` - machine-readable status.

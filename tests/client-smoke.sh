@@ -68,10 +68,10 @@ echo "${status_json}" | jq -e '
   | . as $scores
   | if length < 2 then true else all(range(0; length - 1); $scores[.] >= $scores[. + 1]) end
 ' >/dev/null || fail "tested_live_candidates are not sorted by fallback score"
-echo "${status_json}" | jq -e '.fallback.fallback_score | type == "number"' >/dev/null \
-    || fail "fallback score is missing"
-echo "${status_json}" | jq -e '.fallback.fallback_score_reasons | type == "array"' >/dev/null \
-    || fail "fallback score reasons are missing"
+echo "${status_json}" | jq -e '.active_backend.candidate.fallback_score | type == "number"' >/dev/null \
+    || fail "active backend candidate score is missing"
+echo "${status_json}" | jq -e '.active_backend.candidate.fallback_score_reasons | type == "array"' >/dev/null \
+    || fail "active backend candidate score reasons are missing"
 echo "${status_json}" | jq -e '.candidate_checker.enabled == true' >/dev/null \
     || fail "candidate checker is not enabled"
 echo "${status_json}" | jq -e '.candidate_checker.min_interval == 120 and .candidate_checker.max_interval == 300' >/dev/null \
@@ -84,8 +84,6 @@ echo "${status_json}" | jq -e '.quarantine_count | type == "number"' >/dev/null 
     || fail "quarantine_count is missing"
 echo "${status_json}" | jq -e '.failover_state.state | type == "string"' >/dev/null \
     || fail "failover_state is missing"
-echo "${status_json}" | jq -e '.standby == null or (.standby.tag | type == "string")' >/dev/null \
-    || fail "standby status is invalid"
 echo "${status_json}" | jq -e '.active_backend.running == true and (.active_backend.candidate.tag | type == "string")' >/dev/null \
     || fail "active backend status is invalid"
 echo "${status_json}" | jq -e '.hot_standby.running == true and (.hot_standby.candidate.tag | type == "string")' >/dev/null \
@@ -121,7 +119,7 @@ for health_key in xray_process socks_proxy http_proxy lan_vless quality_download
     echo "${status_json}" | jq -e --arg key "${health_key}" '.health_checks[$key].status | type == "string"' >/dev/null \
         || fail "health check ${health_key} is missing"
 done
-echo "${status_json}" | jq -r '"xray_running=\(.xray_running) candidates=\(.candidates_count) extra=\(.sources.extra // 0) subscription=\(.sources.subscription // 0) fallback=\(.fallback.tag // "-")"'
+echo "${status_json}" | jq -r '"xray_running=\(.xray_running) candidates=\(.candidates_count) extra=\(.sources.extra // 0) subscription=\(.sources.subscription // 0) active=\(.active_backend.candidate.tag // "-") hot=\(.hot_standby.candidate.tag // "-")"'
 
 info "published ports"
 for port in "${SOCKS_PORT}" "${HTTP_PORT}" "${VLESS_PORT}" "${STATUS_PORT}" 53; do

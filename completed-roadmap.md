@@ -74,3 +74,21 @@ Implemented:
 - validated build, startup, status endpoint, SOCKS, HTTP, LAN VLESS, split DNS, RU direct routing, and geo assets.
 
 This reduces the image and code surface to the only mode actually used on the home server.
+
+## 5. V2 Pool Mode Without Single-Candidate Runtime/API
+
+Completed: 2026-06-25.
+
+After v2 stabilization, the remaining active/standby single-candidate surface was removed.
+
+Implemented:
+
+- active and hot standby pools now default to size `3`;
+- removed the pool-selection branch that forced the current single candidate when `size=1`;
+- standby pool no longer seeds from a separate single standby candidate;
+- `/json` no longer publishes top-level `fallback` and `standby` fields;
+- status UI uses active backend, active pool, hot standby, and observatory snapshots;
+- removed the old `/legacy` status page;
+- moved smoke tests to pool-based status fields.
+
+The generated Xray config still uses native `fallbackTag`; that is Xray's first-outbound fallback inside a pool, not a separate legacy runtime mode.
