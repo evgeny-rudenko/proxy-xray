@@ -781,6 +781,8 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 7. State schema v2 и история качества
 
+Статус: реализовано. `state.json` теперь имеет `schema_version: 2`, rolling quality stats, bounded recent checks, atomic save и graceful recovery при поврежденном JSON.
+
 Цель: накапливать качество серверов, а не только последнее значение.
 
 Работы:

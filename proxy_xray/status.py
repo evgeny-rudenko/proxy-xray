@@ -86,6 +86,7 @@ def public_candidate(candidate):
         "last_fail_at": candidate.get("last_fail_at"),
         "quarantine_until": candidate.get("quarantine_until"),
         "quarantine_reason": candidate.get("quarantine_reason"),
+        "quality": candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {},
         "fallback_score": candidate.get("fallback_score"),
         "fallback_score_reasons": candidate.get("fallback_score_reasons") or [],
     }

@@ -556,6 +556,7 @@ def run(args):
                 set_status(hot_standby=slot_public_status(standby_slot))
 
             set_runtime_status(candidates, args, active_slot, standby_slot)
+            persist_state(args, candidates, active=active_slot.get("candidate"))
 
         if (
             args.throughput_check_interval > 0

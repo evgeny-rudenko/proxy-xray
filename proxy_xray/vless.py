@@ -295,6 +295,8 @@ def merge_candidate_state(old_candidates, new_candidates):
             candidate["last_fail_at"] = previous.get("last_fail_at")
             candidate["quarantine_until"] = previous.get("quarantine_until")
             candidate["quarantine_reason"] = previous.get("quarantine_reason")
+            candidate["quality"] = previous.get("quality") if isinstance(previous.get("quality"), dict) else {}
+            candidate["recent_checks"] = previous.get("recent_checks") if isinstance(previous.get("recent_checks"), list) else []
     return new_candidates
 
 
@@ -398,6 +400,32 @@ def candidate_fallback_score(candidate, now=None):
         throughput_bonus = min(80.0, float(throughput) / 1000.0)
         score += throughput_bonus
         reasons.append(f"+{throughput_bonus:.0f} throughput")
+
+    quality = candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {}
+    success_rate = quality.get("success_rate")
+    if success_rate is not None and quality.get("checks", 0) >= 3:
+        rate_bonus = (float(success_rate) - 0.5) * 160
+        score += rate_bonus
+        reasons.append(f"{rate_bonus:+.0f} history")
+
+    consecutive_failures = int(quality.get("consecutive_failures") or 0)
+    if consecutive_failures:
+        failure_penalty = min(240, consecutive_failures * 80)
+        score -= failure_penalty
+        reasons.append(f"-{failure_penalty} fail-streak")
+
+    latency_ewma = quality.get("latency_ewma")
+    if latency_ewma is not None:
+        latency_history_penalty = min(120.0, max(0.0, float(latency_ewma) - 0.35) * 25)
+        if latency_history_penalty > 0:
+            score -= latency_history_penalty
+            reasons.append(f"-{latency_history_penalty:.0f} latency-history")
+
+    throughput_ewma = quality.get("throughput_ewma")
+    if throughput_ewma:
+        throughput_history_bonus = min(60.0, float(throughput_ewma) / 1500.0)
+        score += throughput_history_bonus
+        reasons.append(f"+{throughput_history_bonus:.0f} speed-history")
 
     if not last_ok_at and not last_fail_at:
         reasons.append("unchecked")

@@ -312,6 +312,8 @@ These files are intentionally operator-facing:
 
 `state.json` lives next to `vless-extra.txt` so the whole folder can be copied to another machine while preserving cached subscription candidates and measured state.
 
+`state.json` now uses `schema_version: 2`. Each candidate keeps a bounded recent-check history plus rolling quality stats: success rate, failure streak, latency EWMA, and throughput EWMA. These history signals feed fallback score reasons so stable servers can outrank one-off successes. If the file is corrupted, startup moves it to `state.json.corrupt.<timestamp>` and continues with an empty state instead of crashing.
+
 ## Deployment
 
 The project includes a local one-command deploy script for updating the home server over SSH:

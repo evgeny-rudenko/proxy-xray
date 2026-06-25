@@ -1,1 +1,7 @@
-{}
+{
+  "schema_version": 2,
+  "updated_at": null,
+  "last_selected_uri": null,
+  "last_balancer_fallback_uri": null,
+  "candidates": {}
+}

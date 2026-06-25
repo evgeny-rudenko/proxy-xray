@@ -135,6 +135,17 @@ Candidate checks are intentionally sequential. One random candidate is tested ev
 
 At startup the active slot must pass a preflight health check before public ports are attached to it. If the first fallback in the pool is dead, it is soft-quarantined and another pool is tried.
 
+## State File
+
+`state.json` uses schema v2 and stores candidate cache plus a bounded quality history:
+
+- last OK/fail timestamps;
+- last latency and throughput;
+- last `50` recent checks per candidate;
+- rolling success rate, failure streak, latency EWMA, and throughput EWMA.
+
+The file is written atomically. If it is corrupted, startup moves it to `state.json.corrupt.<timestamp>` and continues with an empty state instead of crashing.
+
 ## Routing And DNS
 
 The default compose routes Russian resources directly:
