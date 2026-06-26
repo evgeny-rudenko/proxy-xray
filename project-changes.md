@@ -266,6 +266,7 @@ Endpoints:
 - `/json` returns status JSON;
 - `/diagnostics` runs live direct/SOCKS/HTTP URL probes and DNS probes;
 - `/diagnostics.json` returns the same sanitized diagnostics in machine-readable form;
+- `/diagnostics/bundle` downloads the same sanitized diagnostic JSON for sharing;
 - `/logs` returns recent supervisor logs.
 
 The HTML page currently shows:

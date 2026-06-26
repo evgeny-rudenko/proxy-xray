@@ -779,6 +779,14 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_download(self, data, content_type, filename):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         args = STATUS_ARGS
         if self.path in ("/", "/status"):
@@ -786,6 +794,10 @@ class StatusHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/diagnostics":
             self.send_bytes(render_diagnostics_html(args), "text/html; charset=utf-8")
+            return
+        if self.path == "/diagnostics/bundle":
+            data = json.dumps(build_diagnostics(args), ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_download(data, "application/json; charset=utf-8", "proxy-xray-diagnostics.json")
             return
         if self.path == "/diagnostics.json":
             data = json.dumps(build_diagnostics(args), ensure_ascii=False, indent=2).encode("utf-8")

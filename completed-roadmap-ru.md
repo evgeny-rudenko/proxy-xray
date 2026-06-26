@@ -92,3 +92,35 @@
 - smoke-тесты переведены на pool-based status fields.
 
 Внутри Xray config остается native `fallbackTag`: это штатный fallback первого outbound внутри pool, а не отдельный старый runtime mode.
+
+## 6. Failover state machine
+
+Завершено: 2026-06-26.
+
+Реализовано:
+
+- decision layer вынесен в `proxy_xray/failover.py`;
+- причины failover считаются отдельными типами: полный обрыв, fast standby failure, latency degradation, quality degradation, throughput degradation;
+- cooldown suppression отделен от самой причины failover;
+- full failure обходит cooldown, а деградация может быть подавлена cooldown-окном;
+- `failover_state` публикуется в `/json`, diagnostics и status UI;
+- состояние содержит kind, reason, full_failure, standby_ready, cooldown_remaining и счетчики проверок;
+- transitions покрыты unit-тестами в `tests/test_failover.py`;
+- smoke-тест проверяет наличие `failover_state`.
+
+Исполнение switch/rebuild остается в `supervisor.py`, но решение о переключении стало отдельной тестируемой state machine.
+
+## 7. Diagnostics и domain probes
+
+Завершено: 2026-06-26.
+
+Реализовано:
+
+- `/diagnostics` показывает live direct/SOCKS/HTTP probes;
+- `/diagnostics.json` возвращает machine-readable sanitized diagnostics;
+- `/diagnostics/bundle` скачивает sanitized diagnostic JSON;
+- diagnostic URLs задаются повторяемыми `--diagnostic-url` флагами и поддерживают CSV;
+- дефолтные probes включают `generate_204`, small download и `pikabu.ru`;
+- DNS diagnostics проверяет RU/global split DNS;
+- output маскирует VLESS URI, subscription URL, Telegram-looking token и UUID;
+- smoke-тест проверяет diagnostics endpoint и отсутствие secret-looking данных.

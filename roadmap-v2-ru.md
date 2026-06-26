@@ -767,7 +767,7 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 6. Failover state machine
 
-Статус: частично реализовано. Decision layer вынесен в `proxy_xray/failover.py`: причины failover, full-failure bypass cooldown и cooldown suppression теперь считаются чистыми функциями и покрыты unit-тестами. Supervisor публикует `failover_state` в `/json` и UI. Реальное исполнение switch/rebuild slot пока остается в `supervisor.py`.
+Статус: реализовано. Decision layer вынесен в `proxy_xray/failover.py`: причины failover, full-failure bypass cooldown и cooldown suppression считаются чистыми функциями и покрыты unit-тестами. Supervisor публикует `failover_state` в `/json` и UI, логи показывают причины переключений и suppression/cooldown. Реальное исполнение switch/rebuild slot остается в `supervisor.py`, но отдельная тестируемая decision state machine уже закрывает цель этапа.
 
 Цель: сделать переключения предсказуемыми и тестируемыми.
 
@@ -817,7 +817,7 @@ scripts/deploy-server.sh home --smoke
 
 ### Этап 8. Diagnostics и domain probes
 
-Статус: частично реализовано. Добавлены `/diagnostics` и `/diagnostics.json`: direct/SOCKS/HTTP URL probes, DNS probes, sanitization чувствительных значений и smoke-проверка отсутствия secret-looking данных. Отдельный downloadable bundle можно добавить следующим шагом при необходимости.
+Статус: реализовано. Добавлены `/diagnostics`, `/diagnostics.json` и `/diagnostics/bundle`: direct/SOCKS/HTTP URL probes, DNS probes, sanitization чувствительных значений, downloadable diagnostic bundle и smoke-проверка отсутствия secret-looking данных.
 
 Цель: быстрее разбирать проблемы вроде неполной загрузки картинок.
 
