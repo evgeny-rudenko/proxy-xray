@@ -106,7 +106,23 @@ The DNS relay exists inside the container, but compose does not publish port `53
 
 ## LAN VLESS Client
 
-When `--inbound-vless` is enabled, LAN clients can use:
+When `--inbound-vless` is enabled, LAN clients can connect to the gateway through the local VLESS inbound on port `10086`.
+
+The easiest way to get the client profile is through the status UI:
+
+1. Open the status UI through the server LAN address, not `127.0.0.1`:
+
+   ```text
+   http://HOME_SERVER_IP:18080/
+   ```
+
+2. Click the `Q` button in the top-right toolbar.
+3. Open the generated `/client` page.
+4. Scan the QR code from V2RayTun or copy the connection string manually.
+
+The page builds the VLESS URL from the address used to open the UI. For example, if the UI is opened as `http://192.168.2.200:18080/`, the generated client URL will point to `192.168.2.200:10086`.
+
+Manual format:
 
 ```text
 vless://INBOUND_VLESS_ID@HOME_SERVER_IP:10086?security=none&type=tcp#home-proxy
@@ -209,8 +225,6 @@ Available endpoints:
 - `/logs` - recent supervisor logs.
 
 The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
-
-The `/client` page builds the VLESS client URL from the address used to open the status UI. Open the UI through the server LAN address, for example `http://192.168.2.200:18080/`, before scanning the QR code from another device.
 
 ![proxy-xray status dashboard](docs/status-dashboard.jpg)
 
