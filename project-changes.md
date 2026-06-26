@@ -263,6 +263,7 @@ The built-in status server listens on `18080`.
 Endpoints:
 
 - `/` shows HTML status;
+- `/client` shows the LAN VLESS connection string and QR code, using the current status page host as the server address;
 - `/json` returns status JSON;
 - `/diagnostics` runs live direct/SOCKS/HTTP URL probes and DNS probes;
 - `/diagnostics.json` returns the same sanitized diagnostics in machine-readable form;

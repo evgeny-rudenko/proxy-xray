@@ -193,6 +193,7 @@ The image seeds bundled assets. Runtime refresh happens on schedule, but compose
 Available endpoints:
 
 - `/` - HTML dashboard.
+- `/client` - LAN VLESS connection string and QR code.
 - `/servers/live` - tested live servers.
 - `/servers/all` - all candidates.
 - `/json` - machine-readable status.
@@ -202,6 +203,8 @@ Available endpoints:
 - `/logs` - recent supervisor logs.
 
 The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
+
+The `/client` page builds the VLESS client URL from the address used to open the status UI. Open the UI through the server LAN address, for example `http://192.168.2.200:18080/`, before scanning the QR code from another device.
 
 ![proxy-xray status dashboard](docs/status-dashboard.jpg)
 

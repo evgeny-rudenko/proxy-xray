@@ -196,7 +196,14 @@ echo "${status_html}" | grep -q "Switch guard" || fail "status page does not sho
 echo "${status_html}" | grep -q "Routing and assets" || fail "status page does not show routing/assets"
 echo "${status_html}" | grep -q "Direct internet" || fail "status page does not show direct internet health"
 echo "${status_html}" | grep -q "LAN VLESS inbound" || fail "status page does not show LAN VLESS health"
+echo "${status_html}" | grep -q 'href="/client"' || fail "status page does not link client QR page"
 echo "timezone: Europe/Moscow (UTC+03:00)"
+
+info "client QR page"
+client_html="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/client")"
+echo "${client_html}" | grep -q "LAN VLESS client" || fail "client page title is missing"
+echo "${client_html}" | grep -q "vless://" || fail "client page does not show VLESS connection string"
+echo "${client_html}" | grep -q "<svg" || fail "client page does not show QR SVG"
 
 info "split DNS"
 class_ru="$(/dns-split-proxy.py --classify yandex.ru)"

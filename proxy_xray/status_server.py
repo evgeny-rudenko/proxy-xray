@@ -5,9 +5,11 @@ import os
 import threading
 import time
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .diagnostics import build_diagnostics
+from .qr import qr_svg
 from .status import LOG_BUFFER, log, status_snapshot
 
 
@@ -359,6 +361,113 @@ def dns_diagnostic_rows(dns):
     return "".join(rows)
 
 
+def host_from_header(host_header):
+    host_header = (host_header or "").split(",", 1)[0].strip()
+    if not host_header:
+        return "127.0.0.1"
+    if host_header.startswith("["):
+        end = host_header.find("]")
+        if end > 0:
+            return host_header[1:end]
+    return host_header.rsplit(":", 1)[0]
+
+
+def client_connection_url(args, host):
+    uuid = getattr(args, "inbound_vless_id", None)
+    port = getattr(args, "inbound_vless_port", 10086)
+    if not uuid:
+        return None
+    display_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"vless://{uuid}@{display_host}:{port}?security=none&type=tcp#{quote('home-proxy')}"
+
+
+def render_client_html(args, host_header):
+    host = host_from_header(host_header)
+    connection_url = client_connection_url(args, host)
+    warning = ""
+    if host in ("127.0.0.1", "localhost", "::1"):
+        warning = (
+            "This page was opened through a loopback address. Open the status UI by the server LAN IP "
+            "to generate a QR code for another device."
+        )
+    if connection_url:
+        try:
+            qr_markup = qr_svg(connection_url)
+        except ValueError as exc:
+            qr_markup = f'<div class="empty">{html.escape(str(exc))}</div>'
+    else:
+        qr_markup = '<div class="empty">LAN VLESS inbound UUID is not configured.</div>'
+        warning = "Set INBOUND_VLESS_ID in .env and restart the container."
+
+    connection_text = connection_url or "-"
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAN VLESS client · proxy-xray</title>
+  <style>
+    :root {{ color-scheme: light; --bg: #eef2f5; --panel: #fff; --text: #17212b; --muted: #61707f; --line: #dbe2e8; --blue: #2563a7; --blue-soft: #e9f2ff; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; background: linear-gradient(180deg, #f7fafc 0, var(--bg) 300px), var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    main {{ width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 42px; }}
+    .topbar {{ display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }}
+    h1 {{ margin: 0; font-size: 24px; line-height: 1.1; }}
+    .muted {{ color: var(--muted); font-size: 13px; margin-top: 6px; }}
+    .actions {{ display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }}
+    .button {{ min-height: 34px; border: 1px solid #c9d3dc; background: #fff; color: #273545; border-radius: 8px; padding: 7px 12px; font-size: 13px; text-decoration: none; display: inline-grid; place-items: center; }}
+    .button.primary {{ color: var(--blue); background: var(--blue-soft); border-color: #c6dcf6; }}
+    .panel {{ background: rgba(255, 255, 255, 0.94); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(30, 45, 62, 0.08); padding: 18px; }}
+    .client-grid {{ display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }}
+    .qr-box {{ background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }}
+    .qr-box svg {{ width: 100%; height: auto; display: block; }}
+    .label {{ color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 750; margin-bottom: 7px; }}
+    .connection {{ width: 100%; min-height: 132px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 11px; background: #f8fafb; color: #17212b; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }}
+    .meta-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }}
+    .meta {{ border: 1px solid var(--line); border-radius: 8px; background: #f8fafb; padding: 10px; min-height: 66px; }}
+    .value {{ font-size: 18px; font-weight: 750; overflow-wrap: anywhere; }}
+    .warn {{ margin-top: 12px; border: 1px solid #f1d39b; background: #fff7e6; color: #714600; border-radius: 8px; padding: 10px 12px; font-size: 13px; }}
+    .empty {{ min-height: 260px; display: grid; place-items: center; color: var(--muted); text-align: center; }}
+    @media (max-width: 760px) {{ .topbar, .client-grid {{ display: block; }} .actions {{ justify-content: flex-start; margin-top: 12px; }} .qr-box {{ margin-bottom: 14px; }} .meta-grid {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <div>
+      <h1>LAN VLESS client</h1>
+      <div class="muted">Generated from this status page address · {html.escape(timezone_label())}</div>
+    </div>
+    <div class="actions"><a class="button" href="/">Status</a><a class="button" href="/json">JSON</a><button class="button primary" type="button" onclick="copyConnection()">Copy</button></div>
+  </header>
+  <section class="panel client-grid">
+    <div class="qr-box">{qr_markup}</div>
+    <div>
+      <div class="label">Connection string</div>
+      <textarea id="connection" class="connection" readonly>{html.escape(connection_text)}</textarea>
+      <div class="meta-grid">
+        <div class="meta"><div class="label">Server</div><div class="value">{html.escape(host)}</div></div>
+        <div class="meta"><div class="label">Port</div><div class="value">{html.escape(str(getattr(args, 'inbound_vless_port', 10086)))}</div></div>
+        <div class="meta"><div class="label">Security</div><div class="value">none</div></div>
+        <div class="meta"><div class="label">Transport</div><div class="value">tcp</div></div>
+      </div>
+      {f'<div class="warn">{html.escape(warning)}</div>' if warning else ''}
+    </div>
+  </section>
+</main>
+<script>
+function copyConnection() {{
+  const field = document.getElementById('connection');
+  field.focus();
+  field.select();
+  navigator.clipboard?.writeText(field.value).catch(() => document.execCommand('copy'));
+}}
+</script>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
 def render_diagnostics_html(args):
     data = build_diagnostics(args)
     summary = data.get("summary") or {}
@@ -614,6 +723,7 @@ def render_status_html():
       <a class="icon-button" href="/json" title="Open JSON">J</a>
       <a class="icon-button" href="/logs" title="Open logs">L</a>
       <a class="icon-button" href="/diagnostics" title="Diagnostics">D</a>
+      <a class="icon-button" href="/client" title="LAN VLESS client QR">Q</a>
     </div>
   </header>
 
@@ -791,6 +901,9 @@ class StatusHandler(BaseHTTPRequestHandler):
         args = STATUS_ARGS
         if self.path in ("/", "/status"):
             self.send_bytes(render_status_html(), "text/html; charset=utf-8")
+            return
+        if self.path == "/client":
+            self.send_bytes(render_client_html(args, self.headers.get("Host")), "text/html; charset=utf-8")
             return
         if self.path == "/diagnostics":
             self.send_bytes(render_diagnostics_html(args), "text/html; charset=utf-8")
