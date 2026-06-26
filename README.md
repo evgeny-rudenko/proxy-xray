@@ -47,12 +47,22 @@ Then edit `.env` and `vless-extra.txt`.
 `.env`:
 
 ```shell
+# VLESS subscription URL from your provider.
 XRAY_SUB_URL=https://example.com/subscription
+
+# UUID for local LAN clients connecting to this gateway on port 10086.
+# Generate once with: python3 -c 'import uuid; print(uuid.uuid4())'
+# Use the same value in V2RayTun / VLESS client config.
 INBOUND_VLESS_ID=00000000-0000-0000-0000-000000000000
+
+# Optional Telegram notification settings.
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
 TZ=Europe/Moscow
 ```
+
+`INBOUND_VLESS_ID` is not issued by the subscription provider. It is your own local client UUID for the inbound VLESS listener on the home gateway. Generate it once, keep it in `.env`, and use the same UUID when creating the LAN VLESS client profile.
 
 `vless-extra.txt` contains one private VLESS URI per line. These servers are not refreshed from the subscription and are sampled more often by the candidate checker.
 
@@ -98,7 +108,7 @@ vless://INBOUND_VLESS_ID@HOME_SERVER_IP:10086?security=none&type=tcp#home-proxy
 
 Replace:
 
-- `INBOUND_VLESS_ID` with the value from `.env`;
+- `INBOUND_VLESS_ID` with your generated value from `.env`;
 - `HOME_SERVER_IP` with the Docker host LAN IP.
 
 ## How Failover Works
