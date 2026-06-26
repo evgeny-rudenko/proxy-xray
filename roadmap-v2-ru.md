@@ -1031,6 +1031,8 @@ v2 можно считать готовой, когда:
 
 ## 12. Предлагаемый порядок первых задач
 
+Статус: исторический порядок первых v2-задач. Этапы 1-8 и 10 уже реализованы, deploy/rollback оставлен на финальную стадию.
+
 Первый практический batch:
 
 1. Закоммитить текущее стабильное состояние.
@@ -1045,3 +1047,235 @@ v2 можно считать готовой, когда:
 - минимальный риск сломать домашний proxy;
 - можно увидеть будущую модель в UI до смены dataplane;
 - легче сравнить v1 и v2 поведение на одном и том же `state.json`.
+
+## 13. Backlog полезных доработок после стабилизации v2
+
+Этот раздел фиксирует улучшения, которые полезны для текущей цели проекта, но не требуют переписывать решение с нуля. Приоритет: сначала повысить предсказуемость и ремонтопригодность control plane, затем добавить операторские действия и только после этого усиливать deploy.
+
+### 13.1. Разделить `supervisor.py` на более независимые модули
+
+Проблема: `supervisor.py` все еще совмещает orchestration loop, запуск slot'ов, failover execution, rebuild standby, обновление state/status, расписания проверок и Telegram side effects. Decision layer уже вынесен в `proxy_xray/failover.py`, но исполнение остается слишком плотным.
+
+Что сделать:
+
+- выделить `slot_manager.py`: запуск, остановка, restart active/standby Xray processes;
+- выделить `scheduler.py`: интервалы subscription refresh, candidate checks, quality checks, geo assets checks;
+- выделить `failover_executor.py`: promotion standby -> active, rebuild old active as standby, cooldown side effects;
+- выделить `status_publisher.py`: сбор snapshot для `/json`, UI и diagnostics;
+- оставить `supervisor.py` тонким orchestration layer, который связывает эти части.
+
+Почему полезно:
+
+- проще проверять логику unit-тестами;
+- меньше риск сломать прокси при правке UI, deploy или Telegram;
+- проще добавлять ручные действия из web UI без хаоса в основном loop.
+
+Критерий приемки:
+
+- `supervisor.py` становится заметно меньше и читает сценарий сверху вниз;
+- текущие smoke-тесты проходят без изменения пользовательских портов;
+- failover, standby rebuild и subscription refresh остаются независимыми сценариями.
+
+### 13.2. Добавить локальные operator actions в Web UI
+
+Проблема: сейчас UI хорошо показывает состояние, но почти не позволяет безопасно выполнить ручное действие. Для домашнего сервера удобно иметь локальные кнопки, потому что UI доступен только в LAN.
+
+Что добавить:
+
+- `Refresh subscription` - принудительно обновить подписку;
+- `Rebuild standby` - пересобрать hot standby pool без трогания active path;
+- `Force switch to standby` - ручное переключение на hot standby;
+- `Clear quarantine` - очистить карантин или снять его с выбранного сервера;
+- `Refresh geo assets` - принудительно обновить `geoip.dat`/`geosite.dat`;
+- `Download diagnostics bundle` - явная кнопка рядом со статусом.
+
+Защита от случайного клика:
+
+- destructive actions делать через confirm form;
+- логировать каждое ручное действие в event timeline;
+- показывать результат действия в UI;
+- не требовать авторизацию, пока UI остается только в LAN.
+
+Критерий приемки:
+
+- каждое действие имеет отдельный endpoint;
+- endpoints не принимают секреты в URL;
+- после действия `/json` и UI показывают обновленное состояние;
+- smoke-тест проверяет хотя бы read-only/безопасные actions.
+
+### 13.3. Event timeline: объяснять, почему система переключалась
+
+Проблема: текущий статус показывает состояние сейчас, но оператору важно понять историю: когда началась деградация, почему был switch, почему standby перестраивался, какой сервер попал в карантин.
+
+Что сделать:
+
+- ввести bounded event log в state, например последние 200 важных событий;
+- события хранить структурированно: `time`, `level`, `kind`, `slot`, `candidate`, `reason`, `details`;
+- показывать на главной странице короткую timeline;
+- полный список вынести на `/events`;
+- включать последние события в diagnostics bundle.
+
+Полезные события:
+
+- subscription refresh success/fail;
+- geo assets refresh success/fail;
+- active health degraded/recovered;
+- failover suppressed by cooldown;
+- switch to standby started/succeeded/failed;
+- standby rebuild started/succeeded/failed;
+- candidate quarantined/unquarantined;
+- manual action requested/completed.
+
+Критерий приемки:
+
+- после переключения видно не только факт, но и цепочку причин;
+- event log не растет бесконечно;
+- секреты в events маскируются.
+
+### 13.4. Manual pin / avoid / boost для кандидатов
+
+Проблема: score автоматический, но у оператора может быть знание, которого система не видит: конкретный сервер стабилен вечером, другой часто ломает картинки, третий нельзя использовать из-за лимитов.
+
+Что добавить:
+
+- `pin` - держать candidate в active pool, если он живой;
+- `avoid` - не использовать candidate до ручной отмены;
+- `boost` - мягко поднять score без абсолютной фиксации;
+- `notes` - короткая локальная заметка оператора;
+- UI-кнопки в списке live/all servers.
+
+Правила:
+
+- `pin` не должен попадать в pool, если сервер явно не работает;
+- `avoid` должен быть сильнее обычного score;
+- ручные правила хранить в state и переживать restart;
+- diagnostic bundle должен маскировать URI, но сохранять tag/name.
+
+Критерий приемки:
+
+- pool selector учитывает ручные правила;
+- score reasons показывают manual pin/avoid/boost;
+- есть тесты на конфликты manual rule + quarantine + preferred region.
+
+### 13.5. Диагностика реального маршрута RU direct/VPN
+
+Проблема: split DNS и geo rules можно проверить косвенно, но при проблемах с картинками нужна уверенность, что RU-трафик реально уходит напрямую, а не частично через VLESS path.
+
+Что сделать:
+
+- добавить diagnostic command, который делает пробный запрос к RU и global endpoint;
+- на Linux-сервере опционально снимать `conntrack`/`ss` snapshot вокруг probe;
+- показывать destination IP, resolved DNS server, выбранный route class: `direct` или `proxy`;
+- добавить проверку `geoip:ru` и `geosite:category-ru` на уровне generated config;
+- в diagnostics bundle включать sanitized route proof.
+
+Ограничение:
+
+- tcpdump/conntrack может требовать дополнительных capabilities, поэтому это должно быть optional diagnostics, а не обязательная часть запуска.
+
+Критерий приемки:
+
+- `/diagnostics` показывает, через какой путь прошел RU probe и global probe;
+- при недоступности low-level tools UI пишет `not available`, а не `fail`;
+- обычный Docker Compose не требует новых привилегий.
+
+### 13.6. Диагностика partial image loading и сетевой деградации
+
+Проблема: `generate_204` может быть зеленым, а большие картинки или CDN-объекты загружаются частично. Это может быть деградация VLESS server, MTU/MSS проблема, HTTP/2/HTTP/3 особенности, DNS-route mix или блокировка конкретного CDN.
+
+Что добавить:
+
+- configurable image/CDN probes с проверкой ожидаемого размера ответа;
+- small/medium download probes: 256 KB, 1 MB, 5 MB с разными timeout;
+- опциональный probe через direct path для RU/CDN доменов;
+- запись `bytes_downloaded`, `expected_bytes`, `duration`, `kbps`, `curl_error`;
+- отдельный UI-блок `Content probes`.
+
+Дополнительно исследовать:
+
+- нужен ли clamp MSS/MTU на контейнерном интерфейсе;
+- влияет ли IPv6, если он доступен;
+- есть ли разница между HTTP/1.1 и HTTP/2 для проблемных сайтов;
+- нужен ли отдельный профиль Xray transport/fingerprint для сайтов, где режется поток.
+
+Критерий приемки:
+
+- проблема "страница открылась, картинка белая наполовину" видна как failed content probe;
+- failover может учитывать content probe как degradation signal, но не переключаться от одного случайного сбоя;
+- probes настраиваются без изменения кода.
+
+### 13.7. Deploy profile и rollback
+
+Проблема: ручное копирование на сервер через shell/Far долгое и рискованное. Текущий `scripts/deploy-server.sh` уже помогает, но нет полноценного профиля и отката.
+
+Что сделать:
+
+- добавить `deploy/home.env.example`;
+- поддержать `scripts/deploy-server.sh home`;
+- перед deploy делать server-side backup текущей версии и runtime files;
+- после deploy запускать smoke checks;
+- при неуспешном smoke предлагать rollback;
+- добавить `scripts/deploy-server.sh home --rollback latest`;
+- сохранять `.env`, `state.json`, `vless-extra.txt`, `assets/` без перезаписи.
+
+Критерий приемки:
+
+- обновление сервера выполняется одной командой;
+- rollback выполняется одной командой;
+- после deploy печатаются UI URL и proxy ports;
+- секреты не попадают в git и logs deploy.
+
+### 13.8. Расширить diagnostics bundle до support snapshot
+
+Проблема: текущий bundle уже маскирует секреты, но для разбора сложной проблемы полезно видеть больше контекста в одном файле.
+
+Что добавить в bundle:
+
+- sanitized `/json`;
+- sanitized diagnostics;
+- последние events;
+- версии Xray, Docker image, commit hash;
+- параметры supervisor без секретов;
+- state summary без URI;
+- active/standby generated config summary без UUID/VLESS links;
+- последние N строк runtime logs с маскированием.
+
+Критерий приемки:
+
+- bundle можно отправить другому человеку без ручной чистки;
+- secret scanner test проверяет bundle output;
+- bundle не содержит полные VLESS URI, subscription URL, Telegram token, UUID.
+
+### 13.9. Проверить и усилить QR generator
+
+Проблема: текущий QR generator написан локально, без зависимости. Это сохраняет образ легким, но несет риск edge case в QR encoding.
+
+Варианты:
+
+- оставить текущий генератор, но добавить больше тестов на длину строки и читаемость;
+- заменить на маленькую проверенную Python-библиотеку, если зависимость приемлема;
+- добавить fallback: если QR не построился, показывать только строку подключения и явную ошибку.
+
+Критерий приемки:
+
+- QR стабильно строится для текущей VLESS строки;
+- тест покрывает типичный LAN host, hostname и IPv4;
+- ошибка QR не ломает status UI.
+
+### 13.10. Профили поведения failover
+
+Проблема: одному пользователю важнее минимальные переключения, другому - быстро бросать медленный сервер. Сейчас баланс зашит во флаги.
+
+Что добавить:
+
+- `conservative` - меньше переключений, выше thresholds;
+- `balanced` - текущий дефолт;
+- `aggressive` - быстрее реагировать на degradation;
+- показывать активный профиль в UI;
+- оставить возможность переопределить отдельные флаги вручную.
+
+Критерий приемки:
+
+- профиль задается одним env/flag;
+- README объясняет tradeoff;
+- tests проверяют хотя бы mapping профиля в thresholds.
