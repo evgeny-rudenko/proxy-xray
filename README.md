@@ -56,6 +56,10 @@ XRAY_SUB_URL=https://example.com/subscription
 INBOUND_VLESS_ID=00000000-0000-0000-0000-000000000000
 
 # Optional Telegram notification settings.
+# TELEGRAM_BOT_TOKEN: create a bot with @BotFather and copy its HTTP API token.
+# TELEGRAM_CHAT_ID: send any message to the bot, then run:
+# curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
+# Use message.chat.id from the response.
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
@@ -63,6 +67,8 @@ TZ=Europe/Moscow
 ```
 
 `INBOUND_VLESS_ID` is not issued by the subscription provider. It is your own local client UUID for the inbound VLESS listener on the home gateway. Generate it once, keep it in `.env`, and use the same UUID when creating the LAN VLESS client profile.
+
+Telegram notifications are optional. Create a bot through `@BotFather`, put the returned API token into `TELEGRAM_BOT_TOKEN`, send any message to that bot from your Telegram account, then call `getUpdates` and copy `message.chat.id` into `TELEGRAM_CHAT_ID`.
 
 `vless-extra.txt` contains one private VLESS URI per line. These servers are not refreshed from the subscription and are sampled more often by the candidate checker.
 
