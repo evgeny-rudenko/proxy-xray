@@ -2,6 +2,8 @@
 
 Dockerized Xray gateway for a home LAN.
 
+Русская версия: [README.ru.md](README.ru.md).
+
 The project runs Xray-Core behind stable local ports and supervises a pool of VLESS servers from a subscription plus an optional private server list. It keeps a hot standby connection ready, checks degradation, switches away from bad paths, exposes a simple status page, and routes Russian domains/IP ranges directly.
 
 ## What It Provides
@@ -151,6 +153,16 @@ The default compose uses:
 - heavy throughput: every `300` seconds, used as a quality metric by default.
 
 Each slot has a score-ordered pool. Xray can choose between several outbounds inside the slot, and the first outbound remains the native Xray fallback if observatory cannot choose one.
+
+Important connection behavior:
+
+- Xray chooses an outbound from the active pool for new connections.
+- Xray does not migrate an already opened TCP connection to another outbound.
+- If the currently selected outbound dies or degrades, new browser/app requests can move to another outbound inside the same active pool.
+- Existing downloads, media streams, or image requests can still stall or break for a short time because they were opened through the old outbound.
+- If the whole active slot is unhealthy or degraded, the supervisor switches the public ports to the hot standby slot.
+
+This means short interruptions are expected during a bad-server event. The goal is to make new connections recover quickly, not to make every existing TCP session survive a server failure.
 
 Failover can be triggered by:
 
