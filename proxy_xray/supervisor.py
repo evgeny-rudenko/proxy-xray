@@ -3,395 +3,38 @@ import time
 
 from .assets import prepare_assets, refresh_assets, set_asset_status
 from .candidate_checker import candidate_check_enabled, random_check_delay, run_random_candidate_check
-from .failover import evaluate_cooldown, evaluate_failover, failover_state
+from .failover import evaluate_failover, failover_state
+from .failover_executor import execute_failover
 from .health import build_health_checks
-from .pool import select_active_pool, select_standby_pool
+from .pool import select_active_pool
+from .scheduler import due_times, initial_schedule, loop_sleep_seconds
 from .state import load_state, persist_state
-from .status import log, public_candidate, set_status, status_candidate_fields, status_snapshot
+from .slot_execution import rebuild_standby, start_active_with_preflight
+from .slot_manager import (
+    SLOTS,
+    check_slot,
+    fresh_slot,
+    record_xray_selected_candidate,
+    refresh_slot_candidate_refs,
+    slot_alive,
+    slot_candidate_tags,
+    slot_candidates,
+    slot_public_status,
+    start_slot,
+    stop_slot,
+    xray_api_status_for_slot,
+)
+from .status import log, set_status, status_candidate_fields, status_snapshot
+from .status_publisher import set_runtime_status
 from .subscription import load_candidates
 from .tcp_switch import set_switch_targets, start_switches, stop_switches
-from .telegram import native_recovery_message, send_telegram_notification
 from .util import load_json_file
 from .vless import (
     clear_expired_quarantine,
     native_candidate_order,
-    promote_candidate,
     quarantine_candidate,
 )
-from .xray_process import curl_check, start_native_xray, terminate_process, throughput_check
-from .xray_api import balancer_snapshot
-
-
-SLOTS = (
-    {
-        "name": "active-a",
-        "config_path": "/tmp/proxy-xray-active-a.json",
-        "socks_port": 11080,
-        "http_port": 18123,
-        "dns_port": 15353,
-        "api_port": 11085,
-        "vless_port": 11086,
-    },
-    {
-        "name": "active-b",
-        "config_path": "/tmp/proxy-xray-active-b.json",
-        "socks_port": 12080,
-        "http_port": 18223,
-        "dns_port": 15354,
-        "api_port": 12085,
-        "vless_port": 12086,
-    },
-)
-
-
-def fresh_slot(template):
-    slot = dict(template)
-    slot.update(
-        {
-            "proc": None,
-            "candidate": None,
-            "candidate_uri": None,
-            "candidates": [],
-            "candidate_uris": [],
-            "fingerprint": None,
-            "healthy": False,
-            "failures": 0,
-            "last_health": None,
-            "started_at": None,
-        }
-    )
-    return slot
-
-
-def slot_alive(slot):
-    proc = slot.get("proc")
-    return bool(proc and proc.poll() is None)
-
-
-def stop_slot(slot):
-    terminate_process(slot.get("proc"))
-    slot["proc"] = None
-    slot["healthy"] = False
-    slot["candidate"] = None
-    slot["candidate_uri"] = None
-    slot["candidates"] = []
-    slot["candidate_uris"] = []
-
-
-def normalize_slot_candidates(candidates):
-    if not candidates:
-        return []
-    if isinstance(candidates, dict):
-        return [candidates]
-    return [candidate for candidate in candidates if candidate]
-
-
-def slot_candidates(slot):
-    return normalize_slot_candidates(slot.get("candidates") or slot.get("candidate"))
-
-
-def slot_candidate_tags(slot):
-    return ", ".join(candidate.get("tag") or "unknown" for candidate in slot_candidates(slot)) or "-"
-
-
-def candidate_by_uri(candidates, uri):
-    if not uri:
-        return None
-    for candidate in candidates:
-        if candidate.get("uri") == uri:
-            return candidate
-    return None
-
-
-def refresh_slot_candidate_refs(slots, candidates):
-    for slot in slots:
-        refreshed = []
-        for uri in slot.get("candidate_uris", []):
-            candidate = candidate_by_uri(candidates, uri)
-            if candidate:
-                refreshed.append(candidate)
-        if refreshed:
-            slot["candidates"] = refreshed
-            slot["candidate"] = refreshed[0]
-            slot["candidate_uri"] = refreshed[0].get("uri")
-            continue
-        candidate = candidate_by_uri(candidates, slot.get("candidate_uri"))
-        if candidate:
-            slot["candidates"] = [candidate]
-            slot["candidate"] = candidate
-
-
-def candidate_label(candidate):
-    return candidate.get("tag") or candidate.get("name") or f"{candidate.get('host')}:{candidate.get('port')}"
-
-
-def start_slot(slot, candidates, args, rules, inject, active=False):
-    candidates = normalize_slot_candidates(candidates)
-    if not candidates:
-        stop_slot(slot)
-        return slot
-    stop_slot(slot)
-    proc, ordered, fingerprint = start_native_xray(
-        candidates,
-        args,
-        rules,
-        inject,
-        config_path=slot["config_path"],
-        socks_port=slot["socks_port"],
-        http_port=slot["http_port"],
-        dns_port=slot["dns_port"],
-        api_port=slot["api_port"],
-        inbound_vless_port=slot["vless_port"],
-        label=f"{slot['name']} {'active' if active else 'hot standby'}",
-        update_status_config=active,
-    )
-    fallback = ordered[0]
-    slot["proc"] = proc
-    slot["candidates"] = ordered
-    slot["candidate_uris"] = [candidate.get("uri") for candidate in ordered if candidate.get("uri")]
-    slot["candidate"] = fallback
-    slot["candidate_uri"] = fallback.get("uri")
-    slot["fingerprint"] = fingerprint
-    slot["healthy"] = False
-    slot["failures"] = 0
-    slot["last_health"] = None
-    slot["started_at"] = time.time()
-    return slot
-
-
-def check_slot(slot, args, record_candidate=True):
-    if not slot.get("candidate") or not slot_alive(slot):
-        slot["healthy"] = False
-        slot["failures"] += 1
-        slot["last_health"] = {"time": time.time(), "status": "failed", "latency": None}
-        return False, None
-
-    ok, latency = curl_check(slot["socks_port"], args.health_url, args.health_timeout)
-    now = time.time()
-    slot["healthy"] = ok
-    slot["last_health"] = {
-        "time": now,
-        "status": "ok" if ok else "failed",
-        "latency": round(latency, 3) if latency is not None else None,
-    }
-    if ok:
-        slot["failures"] = 0
-        if record_candidate:
-            selected = record_xray_selected_candidate(slot, args, latency=latency, mark_ok=True)
-            if not selected or selected is slot["candidate"]:
-                slot["candidate"]["last_ok_at"] = now
-                slot["candidate"]["last_latency"] = latency
-    else:
-        slot["failures"] += 1
-        if record_candidate:
-            slot["candidate"]["last_fail_at"] = now
-    return ok, latency
-
-
-def check_slot_large_download(slot, args):
-    candidate = slot.get("candidate")
-    if not candidate or not slot_alive(slot):
-        return False, 0.0
-    ok, throughput_kbps = throughput_check(slot["socks_port"], args.throughput_url, args.throughput_max_time)
-    now = time.time()
-    if ok and throughput_kbps >= args.throughput_min_kbps:
-        selected = record_xray_selected_candidate(slot, args, throughput_kbps=throughput_kbps, mark_ok=True)
-        if not selected or selected is candidate:
-            candidate["last_ok_at"] = now
-            candidate["last_throughput_kbps"] = round(throughput_kbps)
-        log(
-            f"hot standby large download ok {candidate_label(candidate)}: "
-            f"{throughput_kbps:.0f} kbps"
-        )
-        return True, throughput_kbps
-    candidate["last_fail_at"] = now
-    log(
-        f"hot standby large download failed {candidate_label(candidate)}: "
-        f"{throughput_kbps:.0f} kbps < {args.throughput_min_kbps:.0f} kbps"
-    )
-    return False, throughput_kbps
-
-
-def slot_public_status(slot):
-    candidate = slot.get("candidate")
-    candidates = slot_candidates(slot)
-    return {
-        "name": slot.get("name"),
-        "running": slot_alive(slot),
-        "healthy": slot.get("healthy"),
-        "failures": slot.get("failures", 0),
-        "ports": {
-            "socks": slot.get("socks_port"),
-            "http": slot.get("http_port"),
-            "vless": slot.get("vless_port"),
-            "api": slot.get("api_port"),
-        },
-        "candidate": public_candidate(candidate) if candidate else None,
-        "candidates": [public_candidate(candidate) for candidate in candidates],
-        "pool_size": len(candidates),
-        "last_health": slot.get("last_health"),
-        "started_at": slot.get("started_at"),
-    }
-
-
-def xray_api_status_for_slot(slot, args):
-    candidate = slot.get("candidate")
-    selected = public_candidate(candidate) if candidate else None
-    candidates = slot_candidates(slot)
-    fallback_status = {
-        "status": "ok" if slot_alive(slot) else "fail",
-        "detail": "xray api unavailable because slot is not running" if not slot_alive(slot) else "xray api not checked",
-        "time": time.time(),
-        "slot": slot.get("name"),
-        "api_port": slot.get("api_port"),
-        "balancer": "auto",
-        "strategy": args.balancer_strategy,
-        "selected_tag": selected.get("tag") if selected else None,
-        "selected": selected,
-        "fallback": selected,
-        "selects": [],
-        "pool": [public_candidate(candidate) for candidate in candidates],
-        "pool_size": len(candidates),
-        "raw": "",
-    }
-    if not slot_alive(slot):
-        return fallback_status
-    try:
-        snapshot = balancer_snapshot(candidates, args, api_port=slot["api_port"])
-    except Exception as exc:
-        fallback_status["status"] = "fail"
-        fallback_status["detail"] = f"xray api failed: {exc}"
-        return fallback_status
-    snapshot["slot"] = slot.get("name")
-    snapshot["pool"] = [public_candidate(candidate) for candidate in candidates]
-    snapshot["pool_size"] = len(candidates)
-    if not snapshot.get("selected"):
-        snapshot["selected"] = snapshot.get("fallback")
-        snapshot["selected_tag"] = (snapshot.get("fallback") or {}).get("tag")
-    return snapshot
-
-
-def active_path_for_slot(slot, args):
-    return xray_api_status_for_slot(slot, args)
-
-
-def candidate_by_tag(candidates, tag):
-    for candidate in candidates or []:
-        if candidate.get("tag") == tag:
-            return candidate
-    return None
-
-
-def record_xray_selected_candidate(slot, args, snapshot=None, latency=None, throughput_kbps=None, mark_ok=False):
-    if not slot_alive(slot):
-        return None
-    snapshot = snapshot or xray_api_status_for_slot(slot, args)
-    selected_tag = snapshot.get("selected_tag")
-    candidate = candidate_by_tag(slot_candidates(slot), selected_tag)
-    if not candidate:
-        return None
-    now = time.time()
-    candidate["last_xray_selected_at"] = now
-    candidate["last_xray_selected_slot"] = slot.get("name")
-    if mark_ok:
-        candidate["last_ok_at"] = now
-        if latency is not None:
-            candidate["last_latency"] = latency
-    if throughput_kbps is not None:
-        candidate["last_throughput_kbps"] = round(throughput_kbps)
-    return candidate
-
-
-def set_runtime_status(candidates, args, active_slot, standby_slot):
-    active_pool = slot_candidates(active_slot)
-    standby_pool = slot_candidates(standby_slot)
-    active_api = xray_api_status_for_slot(active_slot, args)
-    standby_api = xray_api_status_for_slot(standby_slot, args)
-    set_status(
-        **status_candidate_fields(candidates, args.standby_max_age),
-        xray_running=slot_alive(active_slot),
-        active_pool=[public_candidate(candidate) for candidate in active_pool],
-        active_backend=slot_public_status(active_slot),
-        standby_pool=[public_candidate(candidate) for candidate in standby_pool],
-        hot_standby=slot_public_status(standby_slot),
-        active_path=active_api,
-        active_observatory=active_api,
-        standby_observatory=standby_api,
-    )
-
-
-def rebuild_standby(standby_slot, candidates, active_pool, args, rules, inject, reason):
-    active_pool = normalize_slot_candidates(active_pool)
-    pool = select_standby_pool(
-        candidates,
-        active_pool=active_pool,
-        size=getattr(args, "standby_pool_size", 1),
-        max_age=args.standby_max_age,
-        extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
-        extra_require_live=getattr(args, "pool_extra_require_live", True),
-        extra_max_age=0,
-        extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
-    )
-    if not pool:
-        log(f"{reason}; no candidate available for hot standby")
-        stop_slot(standby_slot)
-        return None
-    mode = "pool"
-    fallback = pool[0]
-    log(
-        f"{reason}; starting hot standby from {mode}: "
-        f"{candidate_label(fallback)} ({fallback.get('host')}:{fallback.get('port')}); "
-        f"pool={len(pool)}"
-    )
-    start_slot(standby_slot, pool, args, rules, inject, active=False)
-    return pool
-
-
-def start_active_with_preflight(active_slot, candidates, args, rules, inject, reason, attempts=None):
-    attempt_count = attempts or max(
-        3,
-        getattr(args, "active_pool_size", 1) + getattr(args, "standby_pool_size", 1),
-    )
-    warmup_delay = max(0.0, float(getattr(args, "candidate_check_start_delay", 0.0)))
-    for attempt in range(max(1, attempt_count)):
-        pool = select_active_pool(
-            candidates,
-            size=getattr(args, "active_pool_size", 1),
-            extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
-            extra_require_live=getattr(args, "pool_extra_require_live", True),
-            extra_max_age=0,
-            extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
-        )
-        if not pool:
-            log(f"{reason}; no candidate available for active pool")
-            stop_slot(active_slot)
-            return False
-
-        start_slot(active_slot, pool, args, rules, inject, active=True)
-        if warmup_delay > 0:
-            time.sleep(warmup_delay)
-        ok, latency = check_slot(active_slot, args)
-        if ok:
-            log(
-                f"{reason}; active pool ready via {candidate_label(active_slot['candidate'])} "
-                f"({latency:.3f}s); pool={len(slot_candidates(active_slot))}"
-            )
-            return True
-
-        failed = active_slot.get("candidate")
-        if failed:
-            quarantine_candidate(
-                failed,
-                args.quarantine_duration,
-                f"{reason} active preflight failed",
-            )
-            log(
-                f"{reason}; active preflight failed for {candidate_label(failed)} "
-                f"({attempt + 1}/{max(1, attempt_count)}), trying another fallback"
-            )
-        stop_slot(active_slot)
-        candidates = native_candidate_order(candidates)
-    return False
+from .xray_process import curl_check, throughput_check
 
 
 def run(args):
@@ -445,22 +88,21 @@ def run(args):
     )
     set_runtime_status(candidates, args, active_slot, standby_slot)
 
-    now = time.monotonic()
-    next_asset_refresh = now + args.asset_refresh_interval if args.asset_refresh_interval > 0 else None
-    if startup_subscription_status.get("status") == "ok" or args.sub_post_start_refresh_delay <= 0:
-        next_refresh = now + args.refresh_interval
-    else:
-        next_refresh = now + args.sub_post_start_refresh_delay
+    checks_enabled = candidate_check_enabled(args)
+    schedule = initial_schedule(args, startup_subscription_status, checks_enabled=checks_enabled)
+    now = schedule["now"]
+    next_asset_refresh = schedule["next_asset_refresh"]
+    next_refresh = schedule["next_refresh"]
+    next_health_check = schedule["next_health_check"]
+    next_quality_check = schedule["next_quality_check"]
+    next_throughput_check = schedule["next_throughput_check"]
+    next_diagnostics_check = schedule["next_diagnostics_check"]
+    next_active_path_check = schedule["next_active_path_check"]
+    if schedule["subscription_retry_delay"] is not None:
         log(
             "initial subscription refresh did not succeed; "
-            f"retrying through the running proxy in {args.sub_post_start_refresh_delay}s"
+            f"retrying through the running proxy in {schedule['subscription_retry_delay']}s"
         )
-    next_health_check = now + 3
-    next_quality_check = now + 12 if args.quality_check_interval > 0 else None
-    next_throughput_check = now + 8 if args.throughput_check_interval > 0 else None
-    next_diagnostics_check = now + 2
-    next_active_path_check = now + 2
-    checks_enabled = candidate_check_enabled(args)
     next_candidate_check = now + random_check_delay(args) if checks_enabled else None
     if checks_enabled:
         set_status(
@@ -495,18 +137,18 @@ def run(args):
     signal.signal(signal.SIGINT, stop)
 
     while not stopping:
-        due_times = [next_refresh, next_health_check, next_diagnostics_check]
-        if args.active_path_interval > 0:
-            due_times.append(next_active_path_check)
-        if next_asset_refresh is not None:
-            due_times.append(next_asset_refresh)
-        if next_quality_check is not None:
-            due_times.append(next_quality_check)
-        if next_throughput_check is not None:
-            due_times.append(next_throughput_check)
-        if next_candidate_check is not None:
-            due_times.append(next_candidate_check)
-        sleep_for = max(0.1, min(due_times) - time.monotonic())
+        next_due_times = due_times(
+            args,
+            next_refresh=next_refresh,
+            next_health_check=next_health_check,
+            next_diagnostics_check=next_diagnostics_check,
+            next_active_path_check=next_active_path_check,
+            next_asset_refresh=next_asset_refresh,
+            next_quality_check=next_quality_check,
+            next_throughput_check=next_throughput_check,
+            next_candidate_check=next_candidate_check,
+        )
+        sleep_for = loop_sleep_seconds(next_due_times)
         time.sleep(min(sleep_for, 1.0))
         now = time.monotonic()
 
@@ -728,213 +370,36 @@ def run(args):
         )
 
         if decision.triggered:
-            failover_reason = decision.reason
-            cooldown = evaluate_cooldown(decision, switch_cooldown_until, now=now)
-            if cooldown.suppressed:
-                remaining = cooldown.remaining
-                log(f"{failover_reason}; switch suppressed by cooldown for {remaining}s")
-                failures = 0
-                slow_checks = 0
-                quality_slow_checks = 0
-                throughput_slow_checks = 0
-                set_status(
-                    failures=0,
-                    slow_checks=0,
-                    quality_slow_checks=0,
-                    throughput_slow_checks=0,
-                    switch_cooldown_until=time.time() + remaining,
-                    failover_state=failover_state(
-                        decision,
-                        state="suppressed",
-                        cooldown_until=switch_cooldown_until,
-                        now_monotonic=now,
-                        failures=0,
-                        slow_checks=0,
-                        quality_slow_checks=0,
-                        throughput_slow_checks=0,
-                    ),
-                )
-                continue
-
-            set_status(
-                failover_state=failover_state(
-                    decision,
-                    state="switching",
-                    cooldown_until=switch_cooldown_until,
-                    now_monotonic=now,
-                    failures=failures,
-                    slow_checks=slow_checks,
-                    quality_slow_checks=quality_slow_checks,
-                    throughput_slow_checks=throughput_slow_checks,
-                )
+            result = execute_failover(
+                args=args,
+                decision=decision,
+                now=now,
+                switch_cooldown_until=switch_cooldown_until,
+                failures=failures,
+                slow_checks=slow_checks,
+                quality_slow_checks=quality_slow_checks,
+                throughput_slow_checks=throughput_slow_checks,
+                active_slot=active_slot,
+                standby_slot=standby_slot,
+                switches=switches,
+                candidates=candidates,
+                rules=rules,
+                inject=inject,
+                last_health_status=last_health_status,
+                last_throughput_status=last_throughput_status,
             )
-            old_active_slot = active_slot
-            old_standby_slot = standby_slot
-            old_active_candidate = old_active_slot.get("candidate")
-            old_active_pool = slot_candidates(old_active_slot)
-            standby_ok = slot_alive(old_standby_slot) and old_standby_slot.get("healthy")
-            if not standby_ok and slot_alive(old_standby_slot):
-                standby_ok, _latency = check_slot(old_standby_slot, args)
-
-            if old_active_candidate:
-                quarantine_candidate(old_active_candidate, args.quarantine_duration, failover_reason)
-
-            if not standby_ok:
-                log(f"{failover_reason}; hot standby is not healthy, trying cold replacement")
-                failed_standby_candidate = old_standby_slot.get("candidate")
-                if failed_standby_candidate:
-                    quarantine_candidate(failed_standby_candidate, args.quarantine_duration, "hot standby was unhealthy")
-                rebuild_standby(
-                    old_standby_slot,
-                    candidates,
-                    old_active_pool,
-                    args,
-                    rules,
-                    inject,
-                    "cold replacement",
-                )
-                standby_ok, _latency = check_slot(old_standby_slot, args)
-
-            throughput_failover = decision.kind == "throughput_degraded"
-            if standby_ok and throughput_failover and args.throughput_check_interval > 0:
-                for attempt in range(2):
-                    large_ok, _standby_kbps = check_slot_large_download(old_standby_slot, args)
-                    if large_ok:
-                        break
-                    failed_standby_candidate = old_standby_slot.get("candidate")
-                    if failed_standby_candidate:
-                        quarantine_candidate(
-                            failed_standby_candidate,
-                            args.quarantine_duration,
-                            "hot standby failed large download",
-                        )
-                    rebuild_standby(
-                        old_standby_slot,
-                        candidates,
-                        old_active_pool,
-                        args,
-                        rules,
-                        inject,
-                        "standby large download failed",
-                    )
-                    standby_ok, _latency = check_slot(old_standby_slot, args)
-                    if not standby_ok:
-                        break
-                else:
-                    standby_ok = False
-
-            if standby_ok:
-                active_slot, standby_slot = old_standby_slot, old_active_slot
-                set_switch_targets(switches, active_slot)
-                log(
-                    f"{failover_reason}; switched public ports to hot standby "
-                    f"{active_slot['candidate'].get('tag')} "
-                    f"({active_slot['candidate'].get('host')}:{active_slot['candidate'].get('port')}); "
-                    f"pool={len(slot_candidates(active_slot))}"
-                )
-                candidates = promote_candidate(candidates, active_slot.get("candidate"))
-                stop_slot(standby_slot)
-                rebuild_standby(
-                    standby_slot,
-                    candidates,
-                    slot_candidates(active_slot),
-                    args,
-                    rules,
-                    inject,
-                    "after hot switch",
-                )
-                persist_state(args, candidates, active=active_slot.get("candidate"))
-                switch_cooldown_until = time.monotonic() + args.failover_cooldown
-                active_api = xray_api_status_for_slot(active_slot, args)
-                standby_api = xray_api_status_for_slot(standby_slot, args)
-                set_status(
-                    **status_candidate_fields(candidates, args.standby_max_age),
-                    xray_running=slot_alive(active_slot),
-                    failures=0,
-                    slow_checks=0,
-                    quality_slow_checks=0,
-                    throughput_slow_checks=0,
-                    switch_cooldown_until=time.time() + args.failover_cooldown,
-                    active_pool=[public_candidate(candidate) for candidate in slot_candidates(active_slot)],
-                    active_backend=slot_public_status(active_slot),
-                    standby_pool=[public_candidate(candidate) for candidate in slot_candidates(standby_slot)],
-                    hot_standby=slot_public_status(standby_slot),
-                    active_path=active_api,
-                    active_observatory=active_api,
-                    standby_observatory=standby_api,
-                    last_switch={
-                        "time": time.time(),
-                        "reason": failover_reason,
-                        "kind": decision.kind,
-                        "standby_used": True,
-                        "standby_mode": "hot-active",
-                        "from": old_active_candidate.get("tag") if old_active_candidate else None,
-                        "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
-                    },
-                    failover_state=failover_state(
-                        decision,
-                        state="cooldown",
-                        cooldown_until=switch_cooldown_until,
-                        now_monotonic=time.monotonic(),
-                        failures=0,
-                        slow_checks=0,
-                        quality_slow_checks=0,
-                        throughput_slow_checks=0,
-                    ),
-                )
-                time.sleep(args.post_switch_notify_delay)
-                ok, latency = curl_check(1080, args.health_url, args.health_timeout)
-                throughput_kbps = None
-                if ok and args.throughput_check_interval > 0:
-                    throughput_ok, measured = throughput_check(1080, args.throughput_url, args.throughput_max_time)
-                    if throughput_ok:
-                        throughput_kbps = measured
-                if ok:
-                    last_health_status = {"time": time.time(), "status": "ok", "latency": round(latency, 3)}
-                    active_slot["healthy"] = True
-                    active_slot["failures"] = 0
-                    active_slot["last_health"] = last_health_status
-                    if active_slot.get("candidate"):
-                        active_slot["candidate"]["last_ok_at"] = last_health_status["time"]
-                        active_slot["candidate"]["last_latency"] = latency
-                    set_status(last_health=last_health_status, active_backend=slot_public_status(active_slot))
-                    send_telegram_notification(
-                        args,
-                        native_recovery_message(failover_reason, slot_candidates(active_slot), latency, throughput_kbps),
-                    )
-                if throughput_kbps:
-                    last_throughput_status = {
-                        "time": time.time(),
-                        "status": "ok",
-                        "kbps": round(throughput_kbps),
-                    }
-                    if active_slot.get("candidate"):
-                        active_slot["candidate"]["last_throughput_kbps"] = round(throughput_kbps)
-                    set_status(last_throughput=last_throughput_status)
-                failures = 0
-                slow_checks = 0
-                quality_slow_checks = 0
-                throughput_slow_checks = 0
+            active_slot = result.active_slot
+            standby_slot = result.standby_slot
+            candidates = result.candidates
+            switch_cooldown_until = result.switch_cooldown_until
+            last_health_status = result.last_health_status
+            last_throughput_status = result.last_throughput_status
+            failures = result.failures
+            slow_checks = result.slow_checks
+            quality_slow_checks = result.quality_slow_checks
+            throughput_slow_checks = result.throughput_slow_checks
+            if result.skip_remaining_loop:
                 continue
-
-            log(f"{failover_reason}; no healthy standby was available")
-            failures = 0
-            slow_checks = 0
-            quality_slow_checks = 0
-            throughput_slow_checks = 0
-            set_status(failures=0, slow_checks=0, quality_slow_checks=0, throughput_slow_checks=0)
-            set_status(
-                failover_state=failover_state(
-                    decision,
-                    state="failed",
-                    cooldown_until=switch_cooldown_until,
-                    now_monotonic=time.monotonic(),
-                    failures=0,
-                    slow_checks=0,
-                    quality_slow_checks=0,
-                    throughput_slow_checks=0,
-                )
-            )
 
         if next_candidate_check is not None and time.monotonic() >= next_candidate_check:
             run_random_candidate_check(candidates, args)

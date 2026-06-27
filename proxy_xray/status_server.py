@@ -528,6 +528,124 @@ def render_diagnostics_html(args):
     return body.encode("utf-8")
 
 
+def status_fragments(snapshot=None):
+    snapshot = snapshot or status_snapshot()
+    active_backend = snapshot.get("active_backend") or {}
+    hot_standby = snapshot.get("hot_standby") or {}
+    active_path = snapshot.get("active_path") or {}
+    standby_observatory = snapshot.get("standby_observatory") or {}
+    assets = snapshot.get("assets") or {}
+    active_selected = active_path.get("selected") or {}
+    standby_selected = standby_observatory.get("selected") or {}
+    last_throughput = snapshot.get("last_throughput") or {}
+    failover = snapshot.get("failover_state") or {}
+    sources = snapshot.get("sources") or {}
+    tested_live = snapshot.get("tested_live_candidates") or []
+    health_checks = snapshot.get("health_checks") or {}
+    counts = health_counts(health_checks)
+    subscription_fetch = snapshot.get("subscription_fetch") or {}
+    active_backend_candidate = active_backend.get("candidate") or {}
+    hot_standby_candidate = hot_standby.get("candidate") or {}
+    current = active_selected or active_backend_candidate or ((snapshot.get("active_pool") or [{}])[0])
+    current_tag = active_path.get("selected_tag") or current.get("tag") or "-"
+    current_endpoint = endpoint_text(current)
+    current_transport = f"{current.get('network') or '-'} / {current.get('security') or '-'}"
+    standby_display = standby_selected or hot_standby_candidate or ((snapshot.get("standby_pool") or [{}])[0])
+    standby_endpoint = endpoint_text(standby_display) if standby_display else "-"
+    active_pool_size = active_backend.get("pool_size") or active_path.get("pool_size") or len(snapshot.get("active_pool") or [])
+    standby_pool_size = hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or [])
+    xray_chip_class = "ok" if active_backend.get("running", snapshot.get("xray_running")) else "fail"
+    xray_chip_text = "running" if active_backend.get("running", snapshot.get("xray_running")) else "stopped"
+    hot_chip_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
+    api_chip_class = "ok" if active_path.get("status") == "ok" else "warn"
+    failover_note = failover.get("reason") or f"cooldown {failover.get('cooldown_remaining', 0)}s"
+    switch_guard_remaining = int(failover.get("cooldown_remaining") or 0)
+    if counts.get("fail", 0):
+        ring_class = "fail"
+        ring_value = counts.get("fail", 0)
+        ring_label = "FAIL"
+    elif counts.get("warn", 0):
+        ring_class = "warn"
+        ring_value = counts.get("warn", 0)
+        ring_label = "WARN"
+    elif counts.get("ok", 0):
+        ring_class = "ok"
+        ring_value = counts.get("ok", 0)
+        ring_label = "OK"
+    else:
+        ring_class = "unknown"
+        ring_value = counts.get("unknown", 0)
+        ring_label = "UNKNOWN"
+    server_preview = tested_live[:3]
+    log_lines = "\n".join(
+        f"{format_time(item.get('time'))} {item.get('line', '')}" for item in snapshot.get("logs", [])[-14:]
+    )
+    health_copy = "Traffic is served through the active VLESS path. Direct RU routing, split DNS, LAN VLESS inbound, SOCKS and HTTP proxy checks are tracked separately."
+    return {
+        "header-subline": f"{html.escape(timezone_label())} · refreshed {html.escape(format_time(snapshot.get('last_health_checks_at')))} · live update 15s",
+        "system-card": f"""
+      <div class="status-ring {ring_class}"><div><strong>{ring_value}</strong><span>{ring_label}</span></div></div>
+      <div class="system-copy">
+        <h2>{html.escape(health_title(counts))}</h2>
+        <p>{html.escape(health_copy)}</p>
+        <div class="metric-strip">
+          <div class="mini-metric"><div class="label">Candidates</div><div class="metric-value">{snapshot.get('candidates_count', 0)}</div><div class="metric-note">extra {sources.get('extra', 0)} / sub {sources.get('subscription', 0)}</div></div>
+          <div class="mini-metric"><div class="label">Tested live</div><div class="metric-value">{len(tested_live)}</div><div class="metric-note">ready for fallback</div></div>
+          <div class="mini-metric"><div class="label">Throughput</div><div class="metric-value">{html.escape(throughput_text(last_throughput.get('kbps')))}</div><div class="metric-note">active path</div></div>
+          <div class="mini-metric"><div class="label">Next test</div><div class="metric-value">{html.escape(short_time(snapshot.get('next_candidate_check_at')))}</div><div class="metric-note">random jitter</div></div>
+          <div class="mini-metric"><div class="label">Subscription</div><div class="metric-value">{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</div><div class="metric-note">last success</div></div>
+          <div class="mini-metric"><div class="label">Failover</div><div class="metric-value">{html.escape(str(failover.get('state') or 'idle'))}</div><div class="metric-note">{html.escape(str(failover_note))}</div></div>
+        </div>
+      </div>""",
+        "connection-card": f"""
+      <div>
+        <div class="label">Current connection</div>
+        <div class="server-name">{html.escape(str(current_tag))}</div>
+        <div class="server-endpoint">{html.escape(current_endpoint)} · {html.escape(current_transport)}</div>
+      </div>
+      <div class="chips">
+        <span class="chip {xray_chip_class}">{xray_chip_text}</span>
+        <span class="chip {api_chip_class}">api {html.escape(str(active_path.get('status') or '-'))}</span>
+        <span class="chip blue">balancer {html.escape(str(active_path.get('strategy') or '-'))}</span>
+        <span class="chip blue">active pool {active_pool_size}</span>
+        <span class="chip {hot_chip_class}">hot {html.escape(str(hot_standby_candidate.get('tag') or '-'))}</span>
+        <span class="chip {hot_chip_class}">hot pool {standby_pool_size}</span>
+      </div>
+      <div class="connection-grid">
+        <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>
+        <div class="mini-metric"><div class="label">Latency</div><div class="metric-value">{html.escape(format_metric(current.get('last_latency'), 's'))}</div><div class="metric-note">last OK</div></div>
+        <div class="mini-metric"><div class="label">Hot standby</div><div class="metric-value">{html.escape(str(standby_display.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
+        <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(standby_display))}</div><div class="metric-note">{html.escape(score_reasons(standby_display))}</div></div>
+        <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{switch_guard_remaining}s</div><div class="metric-note">cooldown window</div></div>
+      </div>""",
+        "health-panel": f"""
+        <div class="panel-head">
+          <div><h2>Health indicators</h2><div class="panel-subtitle">Separate subsystem status instead of one vague connection flag.</div></div>
+          <div class="chips"><span class="chip ok">OK {counts.get('ok', 0)}</span><span class="chip warn">WARN {counts.get('warn', 0)}</span><span class="chip">UNKNOWN {counts.get('unknown', 0)}</span></div>
+        </div>
+        <div class="health-grid">{render_modern_health_grid(health_checks)}</div>""",
+        "servers-panel": f"""
+        <div class="panel-head">
+          <div><h2>Servers</h2><div class="panel-subtitle">Preview of the live list. Full tables are available in separate tabs.</div></div>
+          <div class="tabs"><a class="tab active" href="/servers/live">Live</a><a class="tab" href="/servers/all">All candidates</a></div>
+        </div>
+        <div class="table-wrap fill">
+          <table><thead><tr><th>Score</th><th>Server</th><th>Endpoint</th><th>Transport</th><th>Latency</th><th>Last OK</th></tr></thead><tbody>{modern_server_rows(server_preview)}</tbody></table>
+        </div>
+        <div class="table-footer"><span>Showing top {len(server_preview)} of {len(tested_live)} live servers, sorted by score.</span><a class="chip blue" href="/servers/live">open full list</a></div>""",
+        "routing-panel": f"""
+        <div class="panel-head"><div><h2>Routing and assets</h2><div class="panel-subtitle">The parts that usually explain "works, but feels slow" problems.</div></div></div>
+        <div class="info-grid">
+          <div class="info-box"><div class="label">Geo assets</div><div class="metric-value">{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</div><div class="metric-note">last downloaded {html.escape(short_time(assets.get('last_success_at')))}</div></div>
+          <div class="info-box"><div class="label">Subscription fetch</div><div class="metric-value">{html.escape(str(subscription_fetch.get('last_method') or '-'))}</div><div class="metric-note">{html.escape(str(subscription_fetch.get('mode') or '-'))}</div></div>
+          <div class="info-box"><div class="label">Direct RU routing</div><div class="metric-value">enabled</div><div class="metric-note">geoip:ru / geosite:category-ru</div></div>
+        </div>""",
+        "logs-panel": f"""
+        <div class="panel-head"><div><h2>Recent events</h2><div class="panel-subtitle">Latest operational log entries.</div></div><a class="chip" href="/logs">plain logs</a></div>
+        <pre class="logs">{html.escape(log_lines)}</pre>""",
+    }
+
+
 def render_status_html():
     snapshot = status_snapshot()
     active_backend = snapshot.get("active_backend") or {}
@@ -581,12 +699,12 @@ def render_status_html():
         f"{format_time(item.get('time'))} {item.get('line', '')}" for item in snapshot.get("logs", [])[-14:]
     )
     health_copy = "Traffic is served through the active VLESS path. Direct RU routing, split DNS, LAN VLESS inbound, SOCKS and HTTP proxy checks are tracked separately."
+    fragments = status_fragments(snapshot)
     body = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="15">
   <title>proxy-xray status</title>
   <style>
     :root {{
@@ -715,7 +833,7 @@ def render_status_html():
       <div class="brand-mark">XR</div>
       <div>
         <h1>proxy-xray status</h1>
-        <div class="subline">{html.escape(timezone_label())} · refreshed {html.escape(format_time(snapshot.get('last_health_checks_at')))} · auto-refresh 15s</div>
+        <div class="subline" data-fragment="header-subline">{fragments["header-subline"]}</div>
       </div>
     </div>
     <div class="header-actions">
@@ -728,89 +846,82 @@ def render_status_html():
   </header>
 
   <section class="hero">
-    <div class="system-card">
-      <div class="status-ring {ring_class}"><div><strong>{ring_value}</strong><span>{ring_label}</span></div></div>
-      <div class="system-copy">
-        <h2>{html.escape(health_title(counts))}</h2>
-        <p>{html.escape(health_copy)}</p>
-        <div class="metric-strip">
-          <div class="mini-metric"><div class="label">Candidates</div><div class="metric-value">{snapshot.get('candidates_count', 0)}</div><div class="metric-note">extra {sources.get('extra', 0)} / sub {sources.get('subscription', 0)}</div></div>
-          <div class="mini-metric"><div class="label">Tested live</div><div class="metric-value">{len(tested_live)}</div><div class="metric-note">ready for fallback</div></div>
-          <div class="mini-metric"><div class="label">Throughput</div><div class="metric-value">{html.escape(throughput_text(last_throughput.get('kbps')))}</div><div class="metric-note">active path</div></div>
-          <div class="mini-metric"><div class="label">Next test</div><div class="metric-value">{html.escape(short_time(snapshot.get('next_candidate_check_at')))}</div><div class="metric-note">random jitter</div></div>
-          <div class="mini-metric"><div class="label">Subscription</div><div class="metric-value">{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</div><div class="metric-note">last success</div></div>
-          <div class="mini-metric"><div class="label">Failover</div><div class="metric-value">{html.escape(str(failover.get('state') or 'idle'))}</div><div class="metric-note">{html.escape(str(failover_note))}</div></div>
-        </div>
-      </div>
+    <div class="system-card" data-fragment="system-card">
+{fragments["system-card"]}
     </div>
 
-    <aside class="connection-card">
-      <div>
-        <div class="label">Current connection</div>
-        <div class="server-name">{html.escape(str(current_tag))}</div>
-        <div class="server-endpoint">{html.escape(current_endpoint)} · {html.escape(current_transport)}</div>
-      </div>
-      <div class="chips">
-        <span class="chip {xray_chip_class}">{xray_chip_text}</span>
-        <span class="chip {api_chip_class}">api {html.escape(str(active_path.get('status') or '-'))}</span>
-        <span class="chip blue">balancer {html.escape(str(active_path.get('strategy') or '-'))}</span>
-        <span class="chip blue">active pool {active_pool_size}</span>
-        <span class="chip {hot_chip_class}">hot {html.escape(str(hot_standby_candidate.get('tag') or '-'))}</span>
-        <span class="chip {hot_chip_class}">hot pool {standby_pool_size}</span>
-      </div>
-      <div class="connection-grid">
-        <div class="mini-metric"><div class="label">Score</div><div class="metric-value">{html.escape(score_value(current))}</div><div class="metric-note">{html.escape(score_reasons(current))}</div></div>
-        <div class="mini-metric"><div class="label">Latency</div><div class="metric-value">{html.escape(format_metric(current.get('last_latency'), 's'))}</div><div class="metric-note">last OK</div></div>
-        <div class="mini-metric"><div class="label">Hot standby</div><div class="metric-value">{html.escape(str(standby_display.get('tag') or '-'))}</div><div class="metric-note">{html.escape(standby_endpoint)}</div></div>
-        <div class="mini-metric"><div class="label">Hot score</div><div class="metric-value">{html.escape(score_value(standby_display))}</div><div class="metric-note">{html.escape(score_reasons(standby_display))}</div></div>
-        <div class="mini-metric"><div class="label">Switch guard</div><div class="metric-value">{switch_guard_remaining}s</div><div class="metric-note">cooldown window</div></div>
-      </div>
+    <aside class="connection-card" data-fragment="connection-card">
+{fragments["connection-card"]}
     </aside>
   </section>
 
   <section class="section-grid">
     <div>
-      <section class="panel">
-        <div class="panel-head">
-          <div><h2>Health indicators</h2><div class="panel-subtitle">Separate subsystem status instead of one vague connection flag.</div></div>
-          <div class="chips"><span class="chip ok">OK {counts.get('ok', 0)}</span><span class="chip warn">WARN {counts.get('warn', 0)}</span><span class="chip">UNKNOWN {counts.get('unknown', 0)}</span></div>
-        </div>
-        <div class="health-grid">{render_modern_health_grid(health_checks)}</div>
+      <section class="panel" data-fragment="health-panel">
+{fragments["health-panel"]}
       </section>
     </div>
     <div>
-      <section class="panel fill">
-        <div class="panel-head">
-          <div><h2>Servers</h2><div class="panel-subtitle">Preview of the live list. Full tables are available in separate tabs.</div></div>
-          <div class="tabs"><a class="tab active" href="/servers/live">Live</a><a class="tab" href="/servers/all">All candidates</a></div>
-        </div>
-        <div class="table-wrap fill">
-          <table><thead><tr><th>Score</th><th>Server</th><th>Endpoint</th><th>Transport</th><th>Latency</th><th>Last OK</th></tr></thead><tbody>{modern_server_rows(server_preview)}</tbody></table>
-        </div>
-        <div class="table-footer"><span>Showing top {len(server_preview)} of {len(tested_live)} live servers, sorted by score.</span><a class="chip blue" href="/servers/live">open full list</a></div>
+      <section class="panel fill" data-fragment="servers-panel">
+{fragments["servers-panel"]}
       </section>
     </div>
   </section>
 
   <section class="lower-grid">
     <div>
-      <section class="panel stretch">
-        <div class="panel-head"><div><h2>Routing and assets</h2><div class="panel-subtitle">The parts that usually explain "works, but feels slow" problems.</div></div></div>
-        <div class="info-grid">
-          <div class="info-box"><div class="label">Geo assets</div><div class="metric-value">{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</div><div class="metric-note">last downloaded {html.escape(short_time(assets.get('last_success_at')))}</div></div>
-          <div class="info-box"><div class="label">Subscription fetch</div><div class="metric-value">{html.escape(str(subscription_fetch.get('last_method') or '-'))}</div><div class="metric-note">{html.escape(str(subscription_fetch.get('mode') or '-'))}</div></div>
-          <div class="info-box"><div class="label">Direct RU routing</div><div class="metric-value">enabled</div><div class="metric-note">geoip:ru / geosite:category-ru</div></div>
-        </div>
+      <section class="panel stretch" data-fragment="routing-panel">
+{fragments["routing-panel"]}
       </section>
     </div>
     <div>
-      <section class="panel stretch">
-        <div class="panel-head"><div><h2>Recent events</h2><div class="panel-subtitle">Latest operational log entries.</div></div><a class="chip" href="/logs">plain logs</a></div>
-        <pre class="logs">{html.escape(log_lines)}</pre>
+      <section class="panel stretch" data-fragment="logs-panel">
+{fragments["logs-panel"]}
       </section>
     </div>
   </section>
 </main>
+<script>
+(() => {{
+  const intervalMs = 15000;
+  const keys = [
+    "header-subline",
+    "system-card",
+    "connection-card",
+    "health-panel",
+    "servers-panel",
+    "routing-panel",
+    "logs-panel",
+  ];
+
+  async function refreshFragments() {{
+    try {{
+      const response = await fetch("/fragments/status", {{ cache: "no-store" }});
+      if (!response.ok) {{
+        throw new Error(`HTTP ${{response.status}}`);
+      }}
+      const payload = await response.json();
+      const fragments = payload.fragments || {{}};
+      for (const key of keys) {{
+        const node = document.querySelector(`[data-fragment="${{key}}"]`);
+        if (node && Object.prototype.hasOwnProperty.call(fragments, key)) {{
+          const next = fragments[key];
+          if (node.innerHTML !== next) {{
+            node.innerHTML = next;
+          }}
+        }}
+      }}
+    }} catch (error) {{
+      console.warn("status fragment refresh failed", error);
+    }}
+  }}
+
+  window.setInterval(refreshFragments, intervalMs);
+  document.addEventListener("visibilitychange", () => {{
+    if (!document.hidden) refreshFragments();
+  }});
+}})();
+</script>
 </body>
 </html>"""
     return body.encode("utf-8")
@@ -901,6 +1012,13 @@ class StatusHandler(BaseHTTPRequestHandler):
         args = STATUS_ARGS
         if self.path in ("/", "/status"):
             self.send_bytes(render_status_html(), "text/html; charset=utf-8")
+            return
+        if self.path == "/fragments/status":
+            data = json.dumps(
+                {"time": time.time(), "fragments": status_fragments()},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_bytes(data, "application/json; charset=utf-8")
             return
         if self.path == "/client":
             self.send_bytes(render_client_html(args, self.headers.get("Host")), "text/html; charset=utf-8")

@@ -231,10 +231,13 @@ Available endpoints:
 - `/servers/live` - tested live servers.
 - `/servers/all` - all candidates.
 - `/json` - machine-readable status.
+- `/fragments/status` - small HTML fragments used for in-place dashboard updates.
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes and DNS probes.
 - `/diagnostics.json` - machine-readable sanitized diagnostic output.
 - `/diagnostics/bundle` - downloadable sanitized diagnostic JSON.
 - `/logs` - recent supervisor logs.
+
+The dashboard does not use full-page auto-refresh. It updates dynamic blocks in place every 15 seconds.
 
 The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
 

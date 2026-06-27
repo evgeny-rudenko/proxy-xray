@@ -52,14 +52,14 @@ info "status endpoint"
 status_json="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/json")"
 echo "${status_json}" | jq -e '.xray_running == true' >/dev/null || fail "xray_running is not true"
 echo "${status_json}" | jq -e '.candidates_count > 0' >/dev/null || fail "no candidates in status"
-echo "${status_json}" | jq -e '.last_subscription_success_at != null' >/dev/null \
-    || fail "last_subscription_success_at is missing"
+echo "${status_json}" | jq -e '.last_subscription_status.status as $status | ["ok", "warn"] | index($status) != null' >/dev/null \
+    || fail "subscription status is not ok/warn"
 echo "${status_json}" | jq -e '.subscription_fetch.mode == "auto"' >/dev/null \
     || fail "subscription fetch mode is not auto"
 echo "${status_json}" | jq -e '.subscription_fetch.proxy == "socks5h://127.0.0.1:1080"' >/dev/null \
     || fail "subscription fetch proxy is not local SOCKS"
-echo "${status_json}" | jq -e '.subscription_fetch.last_method | type == "string"' >/dev/null \
-    || fail "subscription fetch last_method is missing"
+echo "${status_json}" | jq -e 'if .subscription_fetch.last_method == null then true else ((.subscription_fetch.last_method | type) == "string") end' >/dev/null \
+    || fail "subscription fetch last_method has invalid type"
 echo "${status_json}" | jq -e '.tested_live_candidates | type == "array"' >/dev/null \
     || fail "tested_live_candidates is not an array"
 echo "${status_json}" | jq -e '
@@ -94,13 +94,13 @@ echo "${status_json}" | jq -e '.routing.direct_domains | index("geosite:category
     || fail "geosite:category-ru is not configured as direct"
 echo "${status_json}" | jq -e '.routing.direct_ips | index("geoip:ru")' >/dev/null \
     || fail "geoip:ru is not configured as direct"
-echo "${status_json}" | jq -e '.active_path == null or (.active_path.balancer == "auto" and (.active_path.status | type == "string"))' >/dev/null \
+echo "${status_json}" | jq -e 'if .active_path == null then true else (.active_path.balancer == "auto" and ((.active_path.status | type) == "string")) end' >/dev/null \
     || fail "active_path status is invalid"
-echo "${status_json}" | jq -e '.active_observatory == null or (.active_observatory.api_port | type == "number" and (.active_observatory.status | type == "string"))' >/dev/null \
+echo "${status_json}" | jq -e 'if .active_observatory == null then true else ((.active_observatory.api_port | type) == "number" and ((.active_observatory.status | type) == "string")) end' >/dev/null \
     || fail "active_observatory status is invalid"
-echo "${status_json}" | jq -e '.standby_observatory == null or (.standby_observatory.api_port | type == "number" and (.standby_observatory.status | type == "string"))' >/dev/null \
+echo "${status_json}" | jq -e 'if .standby_observatory == null then true else ((.standby_observatory.api_port | type) == "number" and ((.standby_observatory.status | type) == "string")) end' >/dev/null \
     || fail "standby_observatory status is invalid"
-diagnostics_json="$(curl -fsS "http://127.0.0.1:${STATUS_PORT}/diagnostics.json")" \
+diagnostics_json="$(curl -fsS "http://${PROXY_HOST}:${STATUS_PORT}/diagnostics.json")" \
     || fail "diagnostics endpoint failed"
 echo "${diagnostics_json}" | jq -e '.probes | type == "array" and length >= 1' >/dev/null \
     || fail "diagnostics probes are missing"
@@ -197,7 +197,22 @@ echo "${status_html}" | grep -q "Routing and assets" || fail "status page does n
 echo "${status_html}" | grep -q "Direct internet" || fail "status page does not show direct internet health"
 echo "${status_html}" | grep -q "LAN VLESS inbound" || fail "status page does not show LAN VLESS health"
 echo "${status_html}" | grep -q 'href="/client"' || fail "status page does not link client QR page"
+echo "${status_html}" | grep -q "/fragments/status" || fail "status page does not load lazy fragments"
+if echo "${status_html}" | grep -qi "http-equiv=.*refresh"; then
+    fail "status page still uses full-page meta refresh"
+fi
 echo "timezone: Europe/Moscow (UTC+03:00)"
+
+info "status fragments"
+fragments_json="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/fragments/status")"
+echo "${fragments_json}" | jq -e '.fragments["system-card"] | contains("status-ring")' >/dev/null \
+    || fail "status fragments do not include system card"
+echo "${fragments_json}" | jq -e '.fragments["connection-card"] | contains("Current connection")' >/dev/null \
+    || fail "status fragments do not include connection card"
+echo "${fragments_json}" | jq -e '.fragments["health-panel"] | contains("Health indicators")' >/dev/null \
+    || fail "status fragments do not include health panel"
+echo "${fragments_json}" | jq -e '.fragments["logs-panel"] | contains("Recent events")' >/dev/null \
+    || fail "status fragments do not include logs panel"
 
 info "client QR page"
 client_html="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/client")"

@@ -46,6 +46,11 @@ The old single-file subscription supervisor was refactored into the `proxy_xray`
 
 - `proxy_xray/main.py` parses supervisor CLI flags.
 - `proxy_xray/supervisor.py` runs the main control loop.
+- `proxy_xray/scheduler.py` keeps supervisor due-time calculations separate from the loop.
+- `proxy_xray/slot_manager.py` owns active/hot-standby slot lifecycle, Xray process startup, slot health checks, and Xray API snapshots.
+- `proxy_xray/slot_execution.py` builds active and hot-standby pools around slot lifecycle operations.
+- `proxy_xray/failover_executor.py` executes hot-standby promotion, cooldown side effects, standby rebuild, and recovery notifications.
+- `proxy_xray/status_publisher.py` publishes runtime slot/pool status to the UI state.
 - `proxy_xray/subscription.py` loads subscription and extra VLESS candidates.
 - `proxy_xray/vless.py` parses VLESS URLs, filters/ranks candidates, and assigns tags.
 - `proxy_xray/xray_config.py` generates the Xray JSON config.
@@ -78,7 +83,7 @@ Subscription fetch route:
 - default mode is `auto`;
 - startup tries the subscription URL directly because Xray is not running yet;
 - if startup direct fetch fails, the supervisor starts from `vless-extra.txt` or cached state when possible;
-- after Xray starts, a quick retry runs after `15` seconds through `socks5h://127.0.0.1:1080`;
+- after Xray starts, a quick retry runs after `30` seconds through `socks5h://127.0.0.1:1080`;
 - normal refresh remains every `7200` seconds.
 
 Candidate tags are generated as:
@@ -265,10 +270,13 @@ Endpoints:
 - `/` shows HTML status;
 - `/client` shows the LAN VLESS connection string and QR code, using the current status page host as the server address;
 - `/json` returns status JSON;
+- `/fragments/status` returns small HTML fragments used by the status page for in-place updates;
 - `/diagnostics` runs live direct/SOCKS/HTTP URL probes and DNS probes;
 - `/diagnostics.json` returns the same sanitized diagnostics in machine-readable form;
 - `/diagnostics/bundle` downloads the same sanitized diagnostic JSON for sharing;
 - `/logs` returns recent supervisor logs.
+
+The main status page no longer uses full-page meta refresh. It loads once and then refreshes only dynamic blocks every 15 seconds with small `/fragments/status` requests.
 
 The HTML page currently shows:
 

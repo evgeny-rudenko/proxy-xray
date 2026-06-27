@@ -28,7 +28,7 @@ def build_parser():
     parser.add_argument("--fetch-timeout", type=int, default=20)
     parser.add_argument("--sub-fetch-mode", choices=("direct", "proxy", "auto"), default="auto")
     parser.add_argument("--sub-fetch-proxy", default="socks5h://127.0.0.1:1080")
-    parser.add_argument("--sub-post-start-refresh-delay", type=int, default=15)
+    parser.add_argument("--sub-post-start-refresh-delay", type=int, default=30)
     parser.add_argument("--observatory-probe-interval", default="10s")
     parser.add_argument("--balancer-strategy", default="leastPing")
     parser.add_argument("--active-pool-size", type=int, default=3)

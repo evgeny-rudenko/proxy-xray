@@ -1054,7 +1054,23 @@ v2 можно считать готовой, когда:
 
 ### 13.1. Разделить `supervisor.py` на более независимые модули
 
+Статус: реализовано. `supervisor.py` оставлен основным control loop, а execution-части вынесены в отдельные модули.
+
 Проблема: `supervisor.py` все еще совмещает orchestration loop, запуск slot'ов, failover execution, rebuild standby, обновление state/status, расписания проверок и Telegram side effects. Decision layer уже вынесен в `proxy_xray/failover.py`, но исполнение остается слишком плотным.
+
+Реализовано:
+
+- `proxy_xray/slot_manager.py` - slot lifecycle, Xray process startup, slot health, Xray API snapshot;
+- `proxy_xray/slot_execution.py` - active preflight и rebuild hot standby pool;
+- `proxy_xray/failover_executor.py` - promotion standby -> active, cooldown side effects, quarantine, standby rebuild, recovery notification;
+- `proxy_xray/status_publisher.py` - runtime status snapshot для active/standby pool;
+- `proxy_xray/scheduler.py` - начальное расписание supervisor и расчет ближайшего due time.
+
+Результат:
+
+- `supervisor.py` уменьшен с большого mixed-control файла до компактного control loop;
+- slot/failover execution можно менять отдельно от UI/status и scheduling;
+- публичные порты и runtime behavior не менялись.
 
 Что сделать:
 

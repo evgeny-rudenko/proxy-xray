@@ -108,7 +108,7 @@
 - transitions покрыты unit-тестами в `tests/test_failover.py`;
 - smoke-тест проверяет наличие `failover_state`.
 
-Исполнение switch/rebuild остается в `supervisor.py`, но решение о переключении стало отдельной тестируемой state machine.
+Исполнение switch/rebuild позже вынесено из `supervisor.py`; решение о переключении осталось отдельной тестируемой state machine.
 
 ## 7. Diagnostics и domain probes
 
@@ -124,3 +124,17 @@
 - DNS diagnostics проверяет RU/global split DNS;
 - output маскирует VLESS URI, subscription URL, Telegram-looking token и UUID;
 - smoke-тест проверяет diagnostics endpoint и отсутствие secret-looking данных.
+
+## 8. Разнести supervisor execution на модули
+
+Завершено: 2026-06-27.
+
+Реализовано:
+
+- `proxy_xray/slot_manager.py` управляет active/hot-standby slot lifecycle, запуском Xray process, slot health checks и Xray API snapshots;
+- `proxy_xray/slot_execution.py` содержит active preflight и rebuild hot standby pool;
+- `proxy_xray/failover_executor.py` выполняет promotion standby -> active, cooldown side effects, quarantine, standby rebuild и Telegram recovery notification;
+- `proxy_xray/status_publisher.py` публикует runtime status для active/standby pool;
+- `proxy_xray/scheduler.py` держит начальное расписание supervisor и расчет ближайшего due time.
+
+`supervisor.py` уменьшен и теперь в основном читает сценарий control loop, а не детали исполнения slot/failover операций. Runtime behavior и публичные порты не менялись.

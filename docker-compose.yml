@@ -25,7 +25,7 @@ services:
       - --sub-fetch-proxy
       - "socks5h://127.0.0.1:1080"
       - --sub-post-start-refresh-delay
-      - "15"
+      - "30"
       - --sub-check-interval
       - "20"
       - --sub-max-failures

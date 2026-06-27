@@ -227,10 +227,13 @@ Endpoints:
 - `/servers/live` - протестированные живые серверы;
 - `/servers/all` - все кандидаты;
 - `/json` - machine-readable status;
+- `/fragments/status` - небольшие HTML-фрагменты для обновления блоков dashboard без перезагрузки страницы;
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes и DNS probes;
 - `/diagnostics.json` - sanitized diagnostics JSON;
 - `/diagnostics/bundle` - скачиваемый sanitized diagnostics JSON;
 - `/logs` - последние логи supervisor.
+
+Dashboard не использует полную auto-refresh перезагрузку страницы. Динамические блоки обновляются на месте каждые 15 секунд.
 
 Скриншоты в README используют синтетические demo data. Имена серверов, endpoints, IDs и operational details не реальные.
 
