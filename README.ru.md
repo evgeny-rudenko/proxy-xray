@@ -223,11 +223,13 @@ LoyalSoldier assets лежат в `./assets`:
 Endpoints:
 
 - `/` - HTML dashboard;
+- `/dashboard-v5` - экспериментальный второй dashboard для тестирования UI/компоновки;
 - `/client` - LAN VLESS строка подключения и QR-код;
 - `/servers/live` - протестированные живые серверы;
 - `/servers/all` - все кандидаты;
 - `/json` - machine-readable status;
 - `/fragments/status` - небольшие HTML-фрагменты для обновления блоков dashboard без перезагрузки страницы;
+- `/fragments/dashboard-v5` - небольшие HTML-фрагменты для экспериментального dashboard;
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes и DNS probes;
 - `/diagnostics.json` - sanitized diagnostics JSON;
 - `/diagnostics/bundle` - скачиваемый sanitized diagnostics JSON;

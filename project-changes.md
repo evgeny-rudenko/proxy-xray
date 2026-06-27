@@ -268,15 +268,17 @@ The built-in status server listens on `18080`.
 Endpoints:
 
 - `/` shows HTML status;
+- `/dashboard-v5` shows an experimental second dashboard for testing a denser operational layout;
 - `/client` shows the LAN VLESS connection string and QR code, using the current status page host as the server address;
 - `/json` returns status JSON;
 - `/fragments/status` returns small HTML fragments used by the status page for in-place updates;
+- `/fragments/dashboard-v5` returns small HTML fragments used by the experimental dashboard;
 - `/diagnostics` runs live direct/SOCKS/HTTP URL probes and DNS probes;
 - `/diagnostics.json` returns the same sanitized diagnostics in machine-readable form;
 - `/diagnostics/bundle` downloads the same sanitized diagnostic JSON for sharing;
 - `/logs` returns recent supervisor logs.
 
-The main status page no longer uses full-page meta refresh. It loads once and then refreshes only dynamic blocks every 15 seconds with small `/fragments/status` requests.
+The main status page and the experimental dashboard no longer use full-page meta refresh. They load once and then refresh only dynamic blocks every 15 seconds with small fragment requests.
 
 The HTML page currently shows:
 

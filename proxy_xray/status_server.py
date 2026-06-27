@@ -322,6 +322,198 @@ def modern_server_rows(candidates):
     return "".join(rows)
 
 
+def compact_server_cards(candidates, empty_text="No servers in this pool"):
+    cards = []
+    for candidate in candidates:
+        endpoint = endpoint_text(candidate)
+        transport = f"{candidate.get('network') or '-'}/{candidate.get('security') or '-'}"
+        cards.append(
+            '<div class="v5-server-card">'
+            '<div>'
+            f'<div class="v5-server-tag">{html.escape(str(candidate.get("tag") or "-"))}</div>'
+            f'<div class="v5-muted">{html.escape(str(candidate.get("name") or ""))}</div>'
+            "</div>"
+            '<div class="v5-server-meta">'
+            f"<strong>{html.escape(score_value(candidate))}</strong>"
+            f"<span>{html.escape(endpoint)} · {html.escape(transport)}</span>"
+            f"<span>{html.escape(format_metric(candidate.get('last_latency'), 's'))} · {html.escape(short_time(candidate.get('last_ok_at')))}</span>"
+            "</div>"
+            "</div>"
+        )
+    if not cards:
+        cards.append(f'<div class="v5-empty">{html.escape(empty_text)}</div>')
+    return "".join(cards)
+
+
+def compact_health_rows(health_checks):
+    order = [
+        "xray_process",
+        "socks_proxy",
+        "http_proxy",
+        "lan_vless",
+        "quality_download",
+        "throughput",
+        "dns_ru",
+        "dns_global",
+        "telegram",
+        "subscription",
+        "direct_internet",
+    ]
+    rows = []
+    ordered = [(key, health_checks[key]) for key in order if key in health_checks]
+    ordered.extend((key, item) for key, item in health_checks.items() if key not in order)
+    for key, item in ordered:
+        status = item.get("status") or "unknown"
+        label = item.get("label") or key
+        detail = item.get("detail") or "-"
+        latency = item.get("latency")
+        latency_text = f"{latency:.3f}s" if isinstance(latency, (int, float)) else "-"
+        css_class = status_class(status)
+        rows.append(
+            f'<div class="v5-health-row {css_class}">'
+            '<div class="v5-health-main">'
+            f'<span class="v5-dot"></span><strong>{html.escape(str(label))}</strong>'
+            f'<small>{html.escape(str(detail))}</small>'
+            "</div>"
+            f'<div class="v5-health-side"><span>{html.escape(str(status).upper())}</span><small>{html.escape(latency_text)}</small></div>'
+            "</div>"
+        )
+    if not rows:
+        rows.append('<div class="v5-empty">No health checks yet</div>')
+    return "".join(rows)
+
+
+def event_timeline_rows(logs):
+    rows = []
+    for item in logs[-12:]:
+        line = str(item.get("line") or "")
+        lower = line.lower()
+        if "fail" in lower or "timeout" in lower or "degrad" in lower:
+            tone = "fail"
+        elif "warn" in lower or "fallback" in lower or "switch" in lower:
+            tone = "warn"
+        elif "ok" in lower:
+            tone = "ok"
+        else:
+            tone = "neutral"
+        rows.append(
+            f'<div class="v5-event {tone}">'
+            f'<time>{html.escape(short_time(item.get("time")))}</time>'
+            f'<span>{html.escape(line)}</span>'
+            "</div>"
+        )
+    if not rows:
+        rows.append('<div class="v5-empty">No events yet</div>')
+    return "".join(rows)
+
+
+def dashboard_v5_fragments(snapshot=None):
+    snapshot = snapshot or status_snapshot()
+    active_backend = snapshot.get("active_backend") or {}
+    hot_standby = snapshot.get("hot_standby") or {}
+    active_path = snapshot.get("active_path") or {}
+    standby_observatory = snapshot.get("standby_observatory") or {}
+    active_selected = active_path.get("selected") or {}
+    standby_selected = standby_observatory.get("selected") or {}
+    active_backend_candidate = active_backend.get("candidate") or {}
+    hot_standby_candidate = hot_standby.get("candidate") or {}
+    current = active_selected or active_backend_candidate or ((snapshot.get("active_pool") or [{}])[0])
+    standby_display = standby_selected or hot_standby_candidate or ((snapshot.get("standby_pool") or [{}])[0])
+    health_checks = snapshot.get("health_checks") or {}
+    counts = health_counts(health_checks)
+    failover = snapshot.get("failover_state") or {}
+    sources = snapshot.get("sources") or {}
+    assets = snapshot.get("assets") or {}
+    subscription_fetch = snapshot.get("subscription_fetch") or {}
+    last_throughput = snapshot.get("last_throughput") or {}
+    tested_live = snapshot.get("tested_live_candidates") or []
+    active_pool = snapshot.get("active_pool") or []
+    standby_pool = snapshot.get("standby_pool") or []
+    current_tag = active_path.get("selected_tag") or current.get("tag") or "-"
+    current_transport = f"{current.get('network') or '-'} / {current.get('security') or '-'}"
+    current_endpoint = endpoint_text(current)
+    standby_tag = standby_display.get("tag") or "-"
+    standby_endpoint = endpoint_text(standby_display) if standby_display else "-"
+    xray_running = active_backend.get("running", snapshot.get("xray_running"))
+    xray_class = "ok" if xray_running else "fail"
+    api_class = "ok" if active_path.get("status") == "ok" else "warn"
+    hot_class = "ok" if hot_standby.get("healthy") else "warn" if hot_standby.get("running") else "fail"
+    if counts.get("fail", 0):
+        gateway_class = "fail"
+        gateway_title = "Gateway has failures"
+        gateway_note = f'{counts.get("fail", 0)} failing checks need attention'
+    elif counts.get("warn", 0):
+        gateway_class = "warn"
+        gateway_title = "Gateway is degraded"
+        gateway_note = f'{counts.get("warn", 0)} warning checks, traffic still has a path'
+    elif counts.get("ok", 0):
+        gateway_class = "ok"
+        gateway_title = "Gateway is healthy"
+        gateway_note = f'{counts.get("ok", 0)} checks are green'
+    else:
+        gateway_class = "unknown"
+        gateway_title = "Gateway status unknown"
+        gateway_note = "health checks have not reported yet"
+    pool_note = (
+        f'active {len(active_pool)} · hot {len(standby_pool)} · '
+        f'tested {len(tested_live)} of {snapshot.get("candidates_count", 0)}'
+    )
+    failover_note = failover.get("reason") or f"cooldown {failover.get('cooldown_remaining', 0)}s"
+    return {
+        "v5-subline": f"{html.escape(timezone_label())} · refreshed {html.escape(format_time(snapshot.get('last_health_checks_at')))} · live update 15s",
+        "v5-overview": f"""
+        <div class="v5-state {gateway_class}">
+          <span class="v5-state-dot"></span>
+          <div><h2>{html.escape(gateway_title)}</h2><p>{html.escape(gateway_note)}</p></div>
+        </div>
+        <div class="v5-kpi-row">
+          <div class="v5-kpi"><span>Candidates</span><strong>{snapshot.get('candidates_count', 0)}</strong><small>extra {sources.get('extra', 0)} / sub {sources.get('subscription', 0)}</small></div>
+          <div class="v5-kpi"><span>Tested live</span><strong>{len(tested_live)}</strong><small>fallback-ready list</small></div>
+          <div class="v5-kpi"><span>Throughput</span><strong>{html.escape(throughput_text(last_throughput.get('kbps')))}</strong><small>active path</small></div>
+          <div class="v5-kpi"><span>Next test</span><strong>{html.escape(short_time(snapshot.get('next_candidate_check_at')))}</strong><small>weighted random</small></div>
+        </div>""",
+        "v5-current": f"""
+        <div class="v5-panel-title"><span>Current connection</span><a href="/json">JSON</a></div>
+        <div class="v5-current-name">{html.escape(str(current_tag))}</div>
+        <div class="v5-current-endpoint">{html.escape(current_endpoint)} · {html.escape(current_transport)}</div>
+        <div class="v5-chip-row">
+          <span class="v5-chip {xray_class}">xray {'running' if xray_running else 'stopped'}</span>
+          <span class="v5-chip {api_class}">api {html.escape(str(active_path.get('status') or '-'))}</span>
+          <span class="v5-chip ok">balancer {html.escape(str(active_path.get('strategy') or '-'))}</span>
+          <span class="v5-chip {hot_class}">hot {html.escape(str(standby_tag))}</span>
+        </div>
+        <div class="v5-current-grid">
+          <div><span>Score</span><strong>{html.escape(score_value(current))}</strong><small>{html.escape(score_reasons(current, limit=4))}</small></div>
+          <div><span>Latency</span><strong>{html.escape(format_metric(current.get('last_latency'), 's'))}</strong><small>last OK</small></div>
+          <div><span>Hot standby</span><strong>{html.escape(str(standby_tag))}</strong><small>{html.escape(standby_endpoint)}</small></div>
+          <div><span>Switch guard</span><strong>{int(failover.get('cooldown_remaining') or 0)}s</strong><small>{html.escape(str(failover_note))}</small></div>
+        </div>""",
+        "v5-health": f"""
+        <div class="v5-panel-title"><span>Health indicators</span><small>OK {counts.get('ok', 0)} · WARN {counts.get('warn', 0)} · FAIL {counts.get('fail', 0)}</small></div>
+        <div class="v5-health-list">{compact_health_rows(health_checks)}</div>""",
+        "v5-pools": f"""
+        <div class="v5-panel-title"><span>Active and hot pools</span><small>{html.escape(pool_note)}</small></div>
+        <div class="v5-pool-grid">
+          <div><h3>Active pool</h3>{compact_server_cards(active_pool[:4], 'Active pool is empty')}</div>
+          <div><h3>Hot pool</h3>{compact_server_cards(standby_pool[:4], 'Hot pool is empty')}</div>
+        </div>""",
+        "v5-servers": f"""
+        <div class="v5-panel-title"><span>Live servers by score</span><a href="/servers/live">open full list</a></div>
+        <div class="v5-server-list">{compact_server_cards(tested_live[:7], 'No tested live servers yet')}</div>""",
+        "v5-routing": f"""
+        <div class="v5-panel-title"><span>Routing and assets</span><a href="/diagnostics">Diagnostics</a></div>
+        <div class="v5-routing-grid">
+          <div><span>Geo assets</span><strong>{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</strong><small>last {html.escape(short_time(assets.get('last_success_at')))}</small></div>
+          <div><span>Subscription</span><strong>{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</strong><small>{html.escape(str(subscription_fetch.get('last_method') or '-'))} / {html.escape(str(subscription_fetch.get('mode') or '-'))}</small></div>
+          <div><span>Direct RU</span><strong>enabled</strong><small>geoip:ru · geosite:category-ru</small></div>
+          <div><span>Failover</span><strong>{html.escape(str(failover.get('state') or 'idle'))}</strong><small>{html.escape(str(failover_note))}</small></div>
+        </div>""",
+        "v5-events": f"""
+        <div class="v5-panel-title"><span>Event timeline</span><a href="/logs">plain logs</a></div>
+        <div class="v5-events">{event_timeline_rows(snapshot.get('logs') or [])}</div>""",
+    }
+
+
 def probe_status_class(item):
     return status_class((item or {}).get("status"))
 
@@ -838,6 +1030,7 @@ def render_status_html():
     </div>
     <div class="header-actions">
       <a class="icon-button" href="/" title="Refresh">R</a>
+      <a class="icon-button" href="/dashboard-v5" title="Experimental dashboard V5">V5</a>
       <a class="icon-button" href="/json" title="Open JSON">J</a>
       <a class="icon-button" href="/logs" title="Open logs">L</a>
       <a class="icon-button" href="/diagnostics" title="Diagnostics">D</a>
@@ -913,6 +1106,222 @@ def render_status_html():
       }}
     }} catch (error) {{
       console.warn("status fragment refresh failed", error);
+    }}
+  }}
+
+  window.setInterval(refreshFragments, intervalMs);
+  document.addEventListener("visibilitychange", () => {{
+    if (!document.hidden) refreshFragments();
+  }});
+}})();
+</script>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
+def render_dashboard_v5_html():
+    fragments = dashboard_v5_fragments()
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>proxy-xray dashboard v5</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #edf2f6;
+      --panel: #ffffff;
+      --panel-soft: #f7f9fb;
+      --text: #111b27;
+      --muted: #657485;
+      --line: #d7e0e8;
+      --line-strong: #c4d0dc;
+      --green: #168052;
+      --green-soft: #e8f7ef;
+      --amber: #a86400;
+      --amber-soft: #fff4dc;
+      --red: #b9372d;
+      --red-soft: #fff0ee;
+      --blue: #2563a7;
+      --blue-soft: #e9f2ff;
+      --shadow: 0 18px 40px rgba(28, 44, 60, 0.09);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: linear-gradient(180deg, #f8fbfd 0, var(--bg) 360px), var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }}
+    main {{ width: min(1560px, calc(100% - 36px)); margin: 0 auto; padding: 22px 0 40px; }}
+    .v5-topbar {{ display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 14px; }}
+    .v5-brand {{ display: flex; align-items: center; gap: 12px; min-width: 0; }}
+    .v5-mark {{ display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; background: #111b27; color: #fff; font-size: 18px; font-weight: 850; }}
+    h1, h2, h3, p {{ margin: 0; }}
+    h1 {{ font-size: 25px; line-height: 1.05; }}
+    .v5-subline, .v5-muted, small {{ color: var(--muted); }}
+    .v5-subline {{ margin-top: 4px; font-size: 13px; }}
+    .v5-actions {{ display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }}
+    .v5-button {{ min-height: 34px; border: 1px solid var(--line-strong); background: rgba(255,255,255,.82); color: #273545; border-radius: 8px; padding: 7px 11px; font-size: 13px; font-weight: 750; text-decoration: none; display: inline-grid; place-items: center; }}
+    .v5-button.primary {{ color: var(--blue); background: var(--blue-soft); border-color: #c6dcf6; }}
+    .v5-shell {{ display: grid; grid-template-columns: minmax(310px, .74fr) minmax(520px, 1.25fr) minmax(330px, .8fr); gap: 14px; align-items: start; }}
+    .v5-panel {{ background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 14px; }}
+    .v5-stack {{ display: grid; gap: 14px; }}
+    .v5-overview {{ min-height: 172px; }}
+    .v5-state {{ display: flex; align-items: center; gap: 13px; margin-bottom: 14px; }}
+    .v5-state-dot {{ width: 54px; height: 54px; border-radius: 50%; flex: 0 0 auto; box-shadow: inset 0 0 0 10px rgba(255,255,255,.72); }}
+    .v5-state.ok .v5-state-dot {{ background: var(--green); }}
+    .v5-state.warn .v5-state-dot {{ background: var(--amber); }}
+    .v5-state.fail .v5-state-dot {{ background: var(--red); }}
+    .v5-state.unknown .v5-state-dot {{ background: #8a96a3; }}
+    .v5-state h2 {{ font-size: 22px; line-height: 1.1; }}
+    .v5-state p {{ margin-top: 5px; color: var(--muted); font-size: 13px; line-height: 1.35; }}
+    .v5-kpi-row, .v5-current-grid, .v5-routing-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }}
+    .v5-kpi, .v5-current-grid > div, .v5-routing-grid > div {{ min-height: 78px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); padding: 10px; }}
+    .v5-kpi span, .v5-current-grid span, .v5-routing-grid span {{ display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 800; }}
+    .v5-kpi strong, .v5-current-grid strong, .v5-routing-grid strong {{ display: block; margin-top: 5px; font-size: 21px; line-height: 1.05; overflow-wrap: anywhere; }}
+    .v5-kpi small, .v5-current-grid small, .v5-routing-grid small {{ display: block; margin-top: 5px; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }}
+    .v5-panel-title {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }}
+    .v5-panel-title span {{ font-size: 13px; text-transform: uppercase; color: #5d6b7a; font-weight: 850; }}
+    .v5-panel-title a {{ color: var(--blue); text-decoration: none; font-size: 12px; font-weight: 750; }}
+    .v5-current-name {{ font-size: 31px; line-height: 1.02; font-weight: 850; overflow-wrap: anywhere; }}
+    .v5-current-endpoint {{ margin-top: 5px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }}
+    .v5-chip-row {{ display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0; }}
+    .v5-chip {{ display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: #293746; font-size: 12px; font-weight: 700; }}
+    .v5-chip.ok {{ color: var(--green); background: var(--green-soft); border-color: #b8e2ca; }}
+    .v5-chip.warn {{ color: var(--amber); background: var(--amber-soft); border-color: #efd08f; }}
+    .v5-chip.fail {{ color: var(--red); background: var(--red-soft); border-color: #efb4ae; }}
+    .v5-health-list, .v5-server-list, .v5-events {{ display: grid; gap: 8px; }}
+    .v5-health-row, .v5-server-card, .v5-event {{ border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); padding: 9px 10px; }}
+    .v5-health-row {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; }}
+    .v5-health-main {{ display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px; min-width: 0; }}
+    .v5-dot {{ width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; }}
+    .v5-health-row.ok .v5-dot {{ background: var(--green); }}
+    .v5-health-row.warn .v5-dot {{ background: var(--amber); }}
+    .v5-health-row.fail .v5-dot {{ background: var(--red); }}
+    .v5-health-row.unknown .v5-dot {{ background: #8a96a3; }}
+    .v5-health-main strong {{ font-size: 14px; overflow-wrap: anywhere; }}
+    .v5-health-main small {{ grid-column: 2; font-size: 12px; overflow-wrap: anywhere; }}
+    .v5-health-side {{ text-align: right; flex: 0 0 auto; }}
+    .v5-health-side span {{ display: block; font-size: 11px; font-weight: 850; }}
+    .v5-health-row.ok .v5-health-side span {{ color: var(--green); }}
+    .v5-health-row.warn .v5-health-side span {{ color: var(--amber); }}
+    .v5-health-row.fail .v5-health-side span {{ color: var(--red); }}
+    .v5-health-side small {{ display: block; margin-top: 3px; font-size: 11px; }}
+    .v5-pool-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }}
+    h3 {{ color: #4c5d6f; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }}
+    .v5-server-card {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .8fr); gap: 12px; align-items: start; min-height: 72px; }}
+    .v5-server-tag {{ font-size: 16px; font-weight: 850; overflow-wrap: anywhere; }}
+    .v5-muted {{ font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }}
+    .v5-server-meta {{ text-align: right; display: grid; gap: 3px; }}
+    .v5-server-meta strong {{ font-size: 17px; }}
+    .v5-server-meta span {{ color: var(--muted); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }}
+    .v5-event {{ display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 10px; position: relative; }}
+    .v5-event::before {{ content: ""; position: absolute; left: 76px; top: 14px; width: 8px; height: 8px; border-radius: 50%; background: #94a1ad; }}
+    .v5-event.ok::before {{ background: var(--green); }}
+    .v5-event.warn::before {{ background: var(--amber); }}
+    .v5-event.fail::before {{ background: var(--red); }}
+    .v5-event time {{ color: var(--muted); font-size: 12px; }}
+    .v5-event span {{ font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }}
+    .v5-empty {{ border: 1px dashed var(--line-strong); border-radius: 8px; min-height: 58px; display: grid; place-items: center; color: var(--muted); font-size: 13px; padding: 10px; text-align: center; }}
+    @media (max-width: 1220px) {{ .v5-shell {{ grid-template-columns: 1fr 1fr; }} .v5-right {{ grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }} }}
+    @media (max-width: 820px) {{
+      main {{ width: min(100% - 24px, 1560px); }}
+      .v5-topbar, .v5-shell, .v5-right, .v5-pool-grid {{ display: block; }}
+      .v5-actions {{ justify-content: flex-start; margin-top: 12px; }}
+      .v5-panel {{ margin-bottom: 14px; }}
+      .v5-server-card {{ grid-template-columns: 1fr; }}
+      .v5-server-meta {{ text-align: left; }}
+    }}
+    @media (max-width: 560px) {{ .v5-kpi-row, .v5-current-grid, .v5-routing-grid {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+<main>
+  <header class="v5-topbar">
+    <div class="v5-brand">
+      <div class="v5-mark">XR</div>
+      <div>
+        <h1>proxy-xray dashboard v5</h1>
+        <div class="v5-subline" data-fragment="v5-subline">{fragments["v5-subline"]}</div>
+      </div>
+    </div>
+    <nav class="v5-actions">
+      <a class="v5-button primary" href="/">Main dashboard</a>
+      <a class="v5-button" href="/servers/live">Live</a>
+      <a class="v5-button" href="/diagnostics">Diagnostics</a>
+      <a class="v5-button" href="/client">QR</a>
+    </nav>
+  </header>
+
+  <section class="v5-shell">
+    <aside class="v5-stack">
+      <section class="v5-panel v5-overview" data-fragment="v5-overview">
+{fragments["v5-overview"]}
+      </section>
+      <section class="v5-panel" data-fragment="v5-health">
+{fragments["v5-health"]}
+      </section>
+    </aside>
+
+    <section class="v5-stack">
+      <section class="v5-panel" data-fragment="v5-current">
+{fragments["v5-current"]}
+      </section>
+      <section class="v5-panel" data-fragment="v5-pools">
+{fragments["v5-pools"]}
+      </section>
+      <section class="v5-panel" data-fragment="v5-servers">
+{fragments["v5-servers"]}
+      </section>
+    </section>
+
+    <aside class="v5-stack v5-right">
+      <section class="v5-panel" data-fragment="v5-routing">
+{fragments["v5-routing"]}
+      </section>
+      <section class="v5-panel" data-fragment="v5-events">
+{fragments["v5-events"]}
+      </section>
+    </aside>
+  </section>
+</main>
+<script>
+(() => {{
+  const intervalMs = 15000;
+  const keys = [
+    "v5-subline",
+    "v5-overview",
+    "v5-current",
+    "v5-health",
+    "v5-pools",
+    "v5-servers",
+    "v5-routing",
+    "v5-events",
+  ];
+
+  async function refreshFragments() {{
+    try {{
+      const response = await fetch("/fragments/dashboard-v5", {{ cache: "no-store" }});
+      if (!response.ok) {{
+        throw new Error(`HTTP ${{response.status}}`);
+      }}
+      const payload = await response.json();
+      const fragments = payload.fragments || {{}};
+      for (const key of keys) {{
+        const node = document.querySelector(`[data-fragment="${{key}}"]`);
+        if (node && Object.prototype.hasOwnProperty.call(fragments, key)) {{
+          const next = fragments[key];
+          if (node.innerHTML !== next) {{
+            node.innerHTML = next;
+          }}
+        }}
+      }}
+    }} catch (error) {{
+      console.warn("dashboard v5 fragment refresh failed", error);
     }}
   }}
 
@@ -1013,9 +1422,19 @@ class StatusHandler(BaseHTTPRequestHandler):
         if self.path in ("/", "/status"):
             self.send_bytes(render_status_html(), "text/html; charset=utf-8")
             return
+        if self.path in ("/dashboard-v5", "/v5"):
+            self.send_bytes(render_dashboard_v5_html(), "text/html; charset=utf-8")
+            return
         if self.path == "/fragments/status":
             data = json.dumps(
                 {"time": time.time(), "fragments": status_fragments()},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_bytes(data, "application/json; charset=utf-8")
+            return
+        if self.path == "/fragments/dashboard-v5":
+            data = json.dumps(
+                {"time": time.time(), "fragments": dashboard_v5_fragments()},
                 ensure_ascii=False,
             ).encode("utf-8")
             self.send_bytes(data, "application/json; charset=utf-8")
