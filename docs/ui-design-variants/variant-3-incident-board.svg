@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="proxy-xray UI variant 3 incident board">
+  <defs>
+    <style>
+      .bg{fill:#eef3f7}.panel{fill:#fff;stroke:#d7e0e8;stroke-width:1.5}.soft{fill:#f7f9fb;stroke:#d7e0e8;stroke-width:1.5}.warnBox{fill:#fff4dc;stroke:#efd08f}.okBox{fill:#e8f7ef;stroke:#b8e2ca}.failBox{fill:#fff0ee;stroke:#efb4ae}.text{fill:#13202d;font-family:Inter,ui-sans-serif,system-ui,sans-serif}.muted{fill:#667789}.title{font:800 34px Inter,ui-sans-serif}.h2{font:800 24px Inter,ui-sans-serif}.h3{font:800 19px Inter,ui-sans-serif}.value{font:850 36px Inter,ui-sans-serif}.small{font:500 16px Inter,ui-sans-serif}.tiny{font:700 13px Inter,ui-sans-serif}.ok{fill:#168052}.warn{fill:#a86400}.fail{fill:#b9372d}.shadow{filter:url(#shadow)}
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#1c2c3c" flood-opacity=".09"/>
+    </filter>
+  </defs>
+  <rect class="bg" width="1440" height="900"/>
+  <text x="42" y="62" class="text title">Variant 3 · Incident Board</text>
+  <text x="42" y="92" class="text muted small">Designed for moments when the connection exists but feels degraded.</text>
+
+  <rect class="panel shadow" x="42" y="128" width="410" height="694" rx="8"/>
+  <text x="70" y="172" class="text h2">Health queue</text>
+  <g transform="translate(70 202)">
+    <rect class="failBox" x="0" y="0" width="354" height="82" rx="8"/><text x="18" y="34" class="text h3">HTTP proxy</text><text x="18" y="62" class="text muted small">timeout after 4.0s</text><text x="292" y="34" class="text fail tiny">FAIL</text>
+    <rect class="warnBox" x="0" y="98" width="354" height="82" rx="8"/><text x="18" y="132" class="text h3">Quality download</text><text x="18" y="160" class="text muted small">1.2 Mbps · below target</text><text x="286" y="132" class="text warn tiny">WARN</text>
+    <rect class="okBox" x="0" y="196" width="354" height="82" rx="8"/><text x="18" y="230" class="text h3">SOCKS proxy</text><text x="18" y="258" class="text muted small">generate_204 · 0.18s</text><text x="306" y="230" class="text ok tiny">OK</text>
+    <rect class="okBox" x="0" y="294" width="354" height="82" rx="8"/><text x="18" y="328" class="text h3">Direct RU</text><text x="18" y="356" class="text muted small">geoip:ru enabled</text><text x="306" y="328" class="text ok tiny">OK</text>
+  </g>
+
+  <rect class="panel shadow" x="476" y="128" width="496" height="694" rx="8"/>
+  <text x="506" y="172" class="text h2">Current incident</text>
+  <rect class="warnBox" x="506" y="204" width="436" height="126" rx="8"/>
+  <text x="532" y="246" class="text h2">Gateway is degraded</text>
+  <text x="532" y="278" class="text muted small">HTTP checks are failing, SOCKS still works.</text>
+  <text x="532" y="306" class="text muted small">Supervisor keeps current active pool but prepares fallback.</text>
+  <g transform="translate(506 358)">
+    <rect class="soft" x="0" y="0" width="206" height="94" rx="8"/><text x="18" y="31" class="text tiny">CURRENT</text><text x="18" y="65" class="text h3">proxy-sub-0</text>
+    <rect class="soft" x="230" y="0" width="206" height="94" rx="8"/><text x="248" y="31" class="text tiny">HOT STANDBY</text><text x="248" y="65" class="text h3">proxy-extra-0</text>
+    <rect class="soft" x="0" y="112" width="206" height="94" rx="8"/><text x="18" y="143" class="text tiny">FAILOVER</text><text x="18" y="177" class="text h3">guard 45s</text>
+    <rect class="soft" x="230" y="112" width="206" height="94" rx="8"/><text x="248" y="143" class="text tiny">ACTION</text><text x="248" y="177" class="text h3">monitor</text>
+  </g>
+  <rect class="soft" x="506" y="612" width="436" height="152" rx="8"/>
+  <text x="532" y="652" class="text h3">Recommended next view</text>
+  <text x="532" y="684" class="text muted small">Open diagnostics and live servers when WARN persists.</text>
+  <text x="532" y="716" class="text muted small">This layout makes degraded state actionable.</text>
+
+  <rect class="panel shadow" x="996" y="128" width="402" height="694" rx="8"/>
+  <text x="1024" y="172" class="text h2">Live servers</text>
+  <g transform="translate(1024 202)">
+    <rect class="okBox" x="0" y="0" width="346" height="84" rx="8"/><text x="18" y="33" class="text h3">proxy-extra-0</text><text x="18" y="60" class="text muted small">score 1388 · 0.11s</text>
+    <rect class="okBox" x="0" y="100" width="346" height="84" rx="8"/><text x="18" y="133" class="text h3">proxy-sub-4</text><text x="18" y="160" class="text muted small">score 1321 · 0.19s</text>
+    <rect class="okBox" x="0" y="200" width="346" height="84" rx="8"/><text x="18" y="233" class="text h3">proxy-sub-9</text><text x="18" y="260" class="text muted small">score 1250 · 0.34s</text>
+    <rect class="soft" x="0" y="320" width="346" height="186" rx="8"/><text x="18" y="358" class="text h3">Score reasons</text><text x="18" y="390" class="text muted small">+preferred region</text><text x="18" y="420" class="text muted small">+recent ok</text><text x="18" y="450" class="text muted small">-recent fail</text>
+  </g>
+</svg>

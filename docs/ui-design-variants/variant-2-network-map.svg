@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="proxy-xray UI variant 2 network map">
+  <defs>
+    <style>
+      .bg{fill:#eef3f7}.panel{fill:#fff;stroke:#d7e0e8;stroke-width:1.5}.soft{fill:#f7f9fb;stroke:#d7e0e8;stroke-width:1.5}.text{fill:#13202d;font-family:Inter,ui-sans-serif,system-ui,sans-serif}.muted{fill:#667789}.title{font:800 34px Inter,ui-sans-serif}.h2{font:800 24px Inter,ui-sans-serif}.h3{font:800 19px Inter,ui-sans-serif}.small{font:500 16px Inter,ui-sans-serif}.tiny{font:700 13px Inter,ui-sans-serif}.ok{fill:#168052}.blue{fill:#2563a7}.amber{fill:#a86400}.line{stroke:#93a6b8;stroke-width:4;fill:none;stroke-linecap:round}.dash{stroke-dasharray:8 10}.shadow{filter:url(#shadow)}
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#1c2c3c" flood-opacity=".09"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto"><path d="M2,2 L10,6 L2,10 Z" fill="#93a6b8"/></marker>
+  </defs>
+  <rect class="bg" width="1440" height="900"/>
+  <text x="42" y="62" class="text title">Variant 2 · Network Map</text>
+  <text x="42" y="92" class="text muted small">A topology-first dashboard for understanding traffic flow and failure zones.</text>
+
+  <rect class="panel shadow" x="42" y="128" width="1356" height="694" rx="8"/>
+  <rect class="soft" x="88" y="196" width="220" height="120" rx="8"/>
+  <text x="116" y="236" class="text h2">LAN clients</text>
+  <text x="116" y="268" class="text muted small">phone · TV · laptop</text>
+  <text x="116" y="294" class="text muted small">VLESS / SOCKS / HTTP</text>
+
+  <rect class="soft" x="420" y="196" width="250" height="120" rx="8"/>
+  <text x="450" y="236" class="text h2">proxy-xray</text>
+  <text x="450" y="268" class="text muted small">local gateway</text>
+  <text x="450" y="294" class="text muted small">split DNS + routing</text>
+
+  <rect class="soft" x="796" y="158" width="250" height="120" rx="8"/>
+  <text x="826" y="198" class="text h2">Active pool</text>
+  <text x="826" y="230" class="text muted small">3 live outbounds</text>
+  <text x="826" y="256" class="text ok tiny">selected: proxy-sub-0</text>
+
+  <rect class="soft" x="796" y="314" width="250" height="120" rx="8"/>
+  <text x="826" y="354" class="text h2">Hot pool</text>
+  <text x="826" y="386" class="text muted small">ready fallback</text>
+  <text x="826" y="412" class="text ok tiny">extra + subscription</text>
+
+  <rect class="soft" x="1138" y="158" width="190" height="120" rx="8"/>
+  <text x="1166" y="198" class="text h2">Internet</text>
+  <text x="1166" y="230" class="text muted small">global sites</text>
+  <text x="1166" y="256" class="text ok tiny">via VPN</text>
+
+  <rect class="soft" x="1138" y="470" width="190" height="120" rx="8"/>
+  <text x="1166" y="510" class="text h2">RU sites</text>
+  <text x="1166" y="542" class="text muted small">geoip:ru</text>
+  <text x="1166" y="568" class="text ok tiny">direct route</text>
+
+  <rect class="soft" x="420" y="540" width="250" height="120" rx="8"/>
+  <text x="450" y="580" class="text h2">Split DNS</text>
+  <text x="450" y="612" class="text muted small">.ru/.su/.рф to RU DNS</text>
+  <text x="450" y="638" class="text muted small">others to global DNS</text>
+
+  <path class="line" marker-end="url(#arrow)" d="M308 256H420"/>
+  <path class="line" marker-end="url(#arrow)" d="M670 256C720 256 734 220 796 218"/>
+  <path class="line" marker-end="url(#arrow)" d="M1046 218H1138"/>
+  <path class="line dash" marker-end="url(#arrow)" d="M670 276C730 306 734 370 796 374"/>
+  <path class="line" marker-end="url(#arrow)" d="M670 600C830 600 940 530 1138 530"/>
+  <path class="line" marker-end="url(#arrow)" d="M545 316V540"/>
+  <path class="line dash" marker-end="url(#arrow)" d="M545 540C660 480 735 430 796 398"/>
+
+  <rect x="88" y="700" width="1240" height="66" rx="8" fill="#e9f2ff" stroke="#c6dcf6"/>
+  <text x="116" y="740" class="text h3">Better because it makes routing explicit: if a site is slow, the operator can see whether the path should be direct, active pool, hot pool, or DNS.</text>
+</svg>

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-label="proxy-xray UI variant 5 operator console">
+  <defs>
+    <style>
+      .bg{fill:#edf2f6}.panel{fill:#fff;stroke:#d7e0e8;stroke-width:1.5}.soft{fill:#f7f9fb;stroke:#d7e0e8;stroke-width:1.5}.text{fill:#111b27;font-family:Inter,ui-sans-serif,system-ui,sans-serif}.muted{fill:#657485}.title{font:800 34px Inter,ui-sans-serif}.h2{font:800 24px Inter,ui-sans-serif}.h3{font:850 20px Inter,ui-sans-serif}.value{font:850 34px Inter,ui-sans-serif}.small{font:500 16px Inter,ui-sans-serif}.tiny{font:800 13px Inter,ui-sans-serif}.ok{fill:#168052}.warn{fill:#a86400}.blue{fill:#2563a7}.okBox{fill:#e8f7ef;stroke:#b8e2ca}.blueBox{fill:#e9f2ff;stroke:#c6dcf6}.shadow{filter:url(#shadow)}
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#1c2c3c" flood-opacity=".1"/>
+    </filter>
+  </defs>
+  <rect class="bg" width="1600" height="1000"/>
+  <rect x="44" y="36" width="48" height="48" rx="8" fill="#111b27"/>
+  <text x="57" y="68" fill="#fff" class="text" font-size="22" font-weight="850">XR</text>
+  <text x="112" y="62" class="text title">proxy-xray dashboard v5</text>
+  <text x="112" y="92" class="text muted small">Compact operator console · implemented as /dashboard-v5</text>
+  <g transform="translate(1278 42)">
+    <rect class="blueBox" x="0" y="0" width="132" height="42" rx="8"/><text x="20" y="27" class="text blue tiny">Main dashboard</text>
+    <rect class="soft" x="146" y="0" width="70" height="42" rx="8"/><text x="169" y="27" class="text tiny">Live</text>
+    <rect class="soft" x="230" y="0" width="70" height="42" rx="8"/><text x="252" y="27" class="text tiny">QR</text>
+  </g>
+
+  <g transform="translate(44 128)">
+    <rect class="panel shadow" x="0" y="0" width="430" height="198" rx="8"/>
+    <circle cx="72" cy="72" r="32" class="ok"/>
+    <text x="122" y="66" class="text h2">Gateway is healthy</text>
+    <text x="122" y="96" class="text muted small">11 checks are green</text>
+    <rect class="soft" x="28" y="124" width="176" height="48" rx="8"/><text x="44" y="154" class="text h3">63</text><text x="98" y="154" class="text muted small">candidates</text>
+    <rect class="soft" x="226" y="124" width="176" height="48" rx="8"/><text x="242" y="154" class="text h3">43</text><text x="296" y="154" class="text muted small">live</text>
+
+    <rect class="panel shadow" x="0" y="218" width="430" height="584" rx="8"/>
+    <text x="28" y="262" class="text h2">Health indicators</text>
+    <rect class="soft" x="28" y="292" width="374" height="58" rx="8"/><circle cx="54" cy="321" r="6" class="ok"/><text x="76" y="326" class="text h3">SOCKS proxy</text><text x="334" y="326" class="text ok tiny">OK</text>
+    <rect class="soft" x="28" y="364" width="374" height="58" rx="8"/><circle cx="54" cy="393" r="6" class="ok"/><text x="76" y="398" class="text h3">HTTP proxy</text><text x="334" y="398" class="text ok tiny">OK</text>
+    <rect class="soft" x="28" y="436" width="374" height="58" rx="8"/><circle cx="54" cy="465" r="6" class="ok"/><text x="76" y="470" class="text h3">Quality download</text><text x="334" y="470" class="text ok tiny">OK</text>
+    <rect class="soft" x="28" y="508" width="374" height="58" rx="8"/><circle cx="54" cy="537" r="6" class="ok"/><text x="76" y="542" class="text h3">RU DNS direct</text><text x="334" y="542" class="text ok tiny">OK</text>
+    <rect class="soft" x="28" y="580" width="374" height="58" rx="8"/><circle cx="54" cy="609" r="6" class="ok"/><text x="76" y="614" class="text h3">Subscription</text><text x="334" y="614" class="text ok tiny">OK</text>
+  </g>
+
+  <g transform="translate(502 128)">
+    <rect class="panel shadow" x="0" y="0" width="640" height="250" rx="8"/>
+    <text x="28" y="44" class="text tiny">CURRENT CONNECTION</text>
+    <text x="28" y="88" class="text value">proxy-sub-0</text>
+    <text x="28" y="120" class="text muted small">spain-edge.example.net:443 · tcp / reality</text>
+    <rect class="okBox" x="28" y="144" width="92" height="30" rx="15"/><text x="46" y="165" class="text ok tiny">running</text>
+    <rect class="blueBox" x="132" y="144" width="146" height="30" rx="15"/><text x="150" y="165" class="text blue tiny">balancer</text>
+    <rect class="okBox" x="290" y="144" width="124" height="30" rx="15"/><text x="308" y="165" class="text ok tiny">hot ready</text>
+    <rect class="soft" x="28" y="194" width="278" height="44" rx="8"/><text x="44" y="223" class="text h3">1352.469</text><text x="174" y="223" class="text muted small">score</text>
+    <rect class="soft" x="328" y="194" width="278" height="44" rx="8"/><text x="344" y="223" class="text h3">0.121s</text><text x="454" y="223" class="text muted small">latency</text>
+
+    <rect class="panel shadow" x="0" y="270" width="640" height="252" rx="8"/>
+    <text x="28" y="314" class="text h2">Active and hot pools</text>
+    <rect class="soft" x="28" y="342" width="278" height="60" rx="8"/><text x="46" y="378" class="text h3">proxy-sub-0</text><text x="214" y="378" class="text ok tiny">ACTIVE</text>
+    <rect class="soft" x="328" y="342" width="278" height="60" rx="8"/><text x="346" y="378" class="text h3">proxy-extra-0</text><text x="516" y="378" class="text ok tiny">HOT</text>
+    <rect class="soft" x="28" y="418" width="278" height="60" rx="8"/><text x="46" y="454" class="text h3">proxy-sub-4</text><text x="222" y="454" class="text muted tiny">pool</text>
+    <rect class="soft" x="328" y="418" width="278" height="60" rx="8"/><text x="346" y="454" class="text h3">proxy-sub-8</text><text x="522" y="454" class="text muted tiny">pool</text>
+
+    <rect class="panel shadow" x="0" y="542" width="640" height="260" rx="8"/>
+    <text x="28" y="586" class="text h2">Live servers by score</text>
+    <rect class="soft" x="28" y="614" width="584" height="52" rx="8"/><text x="46" y="646" class="text h3">1352</text><text x="128" y="646" class="text small">proxy-sub-0 · Spain</text>
+    <rect class="soft" x="28" y="680" width="584" height="52" rx="8"/><text x="46" y="712" class="text h3">1234</text><text x="128" y="712" class="text small">proxy-extra-0 · Private</text>
+    <rect class="soft" x="28" y="746" width="584" height="52" rx="8"/><text x="46" y="778" class="text h3">1210</text><text x="128" y="778" class="text small">proxy-sub-8 · Germany</text>
+  </g>
+
+  <g transform="translate(1170 128)">
+    <rect class="panel shadow" x="0" y="0" width="386" height="230" rx="8"/>
+    <text x="28" y="44" class="text h2">Routing and assets</text>
+    <rect class="soft" x="28" y="74" width="330" height="48" rx="8"/><text x="44" y="104" class="text h3">Geo assets ok</text>
+    <rect class="soft" x="28" y="136" width="330" height="48" rx="8"/><text x="44" y="166" class="text h3">Direct RU enabled</text>
+    <rect class="panel shadow" x="0" y="250" width="386" height="552" rx="8"/>
+    <text x="28" y="294" class="text h2">Event timeline</text>
+    <text x="28" y="338" class="text muted small">13:42 quality download ok</text>
+    <text x="28" y="376" class="text muted small">13:41 hot standby ok</text>
+    <text x="28" y="414" class="text muted small">13:40 candidate ok proxy-sub-7</text>
+    <text x="28" y="452" class="text muted small">13:36 subscription via proxy</text>
+    <text x="28" y="490" class="text muted small">13:35 direct subscription timeout</text>
+    <rect x="28" y="670" width="330" height="86" rx="8" fill="#e9f2ff" stroke="#c6dcf6"/>
+    <text x="48" y="704" class="text h3">Why this won</text>
+    <text x="48" y="734" class="text muted small">Dense, readable and close to current data model.</text>
+  </g>
+</svg>

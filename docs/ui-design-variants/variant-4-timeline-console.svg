@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-label="proxy-xray UI variant 4 timeline console">
+  <defs>
+    <style>
+      .bg{fill:#edf2f6}.panel{fill:#fff;stroke:#d7e0e8;stroke-width:1.5}.soft{fill:#f7f9fb;stroke:#d7e0e8;stroke-width:1.5}.dark{fill:#101820}.text{fill:#13202d;font-family:Inter,ui-sans-serif,system-ui,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.muted{fill:#667789}.title{font:800 36px Inter,ui-sans-serif}.h2{font:800 25px Inter,ui-sans-serif}.h3{font:800 19px Inter,ui-sans-serif}.small{font:500 16px Inter,ui-sans-serif}.tiny{font:700 13px Inter,ui-sans-serif}.ok{fill:#168052}.warn{fill:#a86400}.fail{fill:#b9372d}.line{stroke:#d7e0e8;stroke-width:2}.shadow{filter:url(#shadow)}
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#1c2c3c" flood-opacity=".1"/>
+    </filter>
+  </defs>
+  <rect class="bg" width="1600" height="1000"/>
+  <text x="44" y="64" class="text title">Variant 4 · Timeline Console</text>
+  <text x="44" y="96" class="text muted small">The central question is not "what is green now", but "what happened and why".</text>
+
+  <rect class="panel shadow" x="44" y="130" width="430" height="804" rx="8"/>
+  <text x="74" y="174" class="text h2">Current state</text>
+  <rect class="soft" x="74" y="204" width="370" height="128" rx="8"/>
+  <text x="100" y="248" class="text h2">proxy-sub-0</text>
+  <text x="100" y="280" class="text muted small">selected by balancer</text>
+  <text x="100" y="308" class="text ok tiny">running · score 1352 · 0.121s</text>
+  <rect class="soft" x="74" y="352" width="370" height="128" rx="8"/>
+  <text x="100" y="396" class="text h2">proxy-extra-0</text>
+  <text x="100" y="428" class="text muted small">hot standby</text>
+  <text x="100" y="456" class="text ok tiny">ready · score 1234 · 0.118s</text>
+  <rect class="soft" x="74" y="512" width="370" height="352" rx="8"/>
+  <text x="100" y="554" class="text h3">Subsystems</text>
+  <text x="100" y="594" class="text ok tiny">OK</text><text x="154" y="594" class="text small">SOCKS proxy</text>
+  <text x="100" y="632" class="text ok tiny">OK</text><text x="154" y="632" class="text small">HTTP proxy</text>
+  <text x="100" y="670" class="text ok tiny">OK</text><text x="154" y="670" class="text small">Quality download</text>
+  <text x="100" y="708" class="text ok tiny">OK</text><text x="154" y="708" class="text small">RU DNS direct</text>
+  <text x="100" y="746" class="text ok tiny">OK</text><text x="154" y="746" class="text small">Telegram API</text>
+  <text x="100" y="806" class="text muted small">Left column stays stable while events update.</text>
+
+  <rect class="panel shadow" x="502" y="130" width="660" height="804" rx="8"/>
+  <text x="532" y="174" class="text h2">Event timeline</text>
+  <line x1="594" y1="224" x2="594" y2="842" class="line"/>
+  <g class="text mono" font-size="15">
+    <circle cx="594" cy="246" r="8" class="ok"/><text x="532" y="251" fill="#667789">13:40</text><text x="624" y="251" fill="#13202d">quality download ok: 31.8 Mbps</text>
+    <circle cx="594" cy="320" r="8" class="ok"/><text x="532" y="325" fill="#667789">13:38</text><text x="624" y="325" fill="#13202d">hot standby ok: proxy-extra-0, proxy-sub-8</text>
+    <circle cx="594" cy="394" r="8" class="warn"/><text x="532" y="399" fill="#667789">13:35</text><text x="624" y="399" fill="#13202d">subscription direct timeout, retry through proxy</text>
+    <circle cx="594" cy="468" r="8" class="ok"/><text x="532" y="473" fill="#667789">13:34</text><text x="624" y="473" fill="#13202d">loaded 61 subscription links via proxy</text>
+    <circle cx="594" cy="542" r="8" class="ok"/><text x="532" y="547" fill="#667789">13:31</text><text x="624" y="547" fill="#13202d">candidate ok proxy-sub-14: 0.294s</text>
+    <circle cx="594" cy="616" r="8" class="fail"/><text x="532" y="621" fill="#667789">13:25</text><text x="624" y="621" fill="#13202d">HTTP check timeout after 4.0s</text>
+    <circle cx="594" cy="690" r="8" class="warn"/><text x="532" y="695" fill="#667789">13:25</text><text x="624" y="695" fill="#13202d">failover guard active, waiting stable hot pool</text>
+    <circle cx="594" cy="764" r="8" class="ok"/><text x="532" y="769" fill="#667789">13:22</text><text x="624" y="769" fill="#13202d">active pool ready via proxy-sub-0</text>
+  </g>
+  <rect x="532" y="858" width="600" height="44" rx="8" fill="#e9f2ff" stroke="#c6dcf6"/>
+  <text x="552" y="886" class="text tiny" fill="#2563a7">Best for debugging: event order is visible without opening raw logs.</text>
+
+  <rect class="panel shadow" x="1190" y="130" width="366" height="804" rx="8"/>
+  <text x="1220" y="174" class="text h2">Quick actions</text>
+  <rect class="soft" x="1220" y="204" width="306" height="90" rx="8"/><text x="1244" y="242" class="text h3">Diagnostics</text><text x="1244" y="270" class="text muted small">direct / socks / http probes</text>
+  <rect class="soft" x="1220" y="314" width="306" height="90" rx="8"/><text x="1244" y="352" class="text h3">Live servers</text><text x="1244" y="380" class="text muted small">score, latency, last OK</text>
+  <rect class="soft" x="1220" y="424" width="306" height="90" rx="8"/><text x="1244" y="462" class="text h3">Client QR</text><text x="1244" y="490" class="text muted small">LAN VLESS setup</text>
+  <rect class="dark" x="1220" y="552" width="306" height="312" rx="8"/>
+  <text x="1244" y="588" fill="#dbe4ed" class="text h3">Raw tail</text>
+  <text x="1244" y="628" fill="#9fb0bf" class="mono" font-size="14">13:40 quality ok</text>
+  <text x="1244" y="660" fill="#9fb0bf" class="mono" font-size="14">13:38 hot standby ok</text>
+  <text x="1244" y="692" fill="#9fb0bf" class="mono" font-size="14">13:35 direct timeout</text>
+  <text x="1244" y="724" fill="#9fb0bf" class="mono" font-size="14">13:34 sub via proxy</text>
+</svg>
