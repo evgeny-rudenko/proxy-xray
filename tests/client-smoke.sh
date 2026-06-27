@@ -189,6 +189,7 @@ info "status timezone"
 status_html="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/")"
 echo "${status_html}" | grep -q "Europe/Moscow" || fail "status page does not show Europe/Moscow timezone"
 echo "${status_html}" | grep -q "UTC+03:00" || fail "status page does not show UTC+03:00 offset"
+echo "${status_html}" | grep -q "proxy-xray status" || fail "status page title is missing"
 echo "${status_html}" | grep -q "Health indicators" || fail "status page does not show health indicators"
 echo "${status_html}" | grep -q "Current connection" || fail "status page does not show current connection"
 echo "${status_html}" | grep -q "Hot standby" || fail "status page does not show hot standby"
@@ -197,27 +198,42 @@ echo "${status_html}" | grep -q "Routing and assets" || fail "status page does n
 echo "${status_html}" | grep -q "Direct internet" || fail "status page does not show direct internet health"
 echo "${status_html}" | grep -q "LAN VLESS inbound" || fail "status page does not show LAN VLESS health"
 echo "${status_html}" | grep -q 'href="/client"' || fail "status page does not link client QR page"
-echo "${status_html}" | grep -q 'href="/dashboard-v5"' || fail "status page does not link dashboard v5"
-echo "${status_html}" | grep -q "/fragments/status" || fail "status page does not load lazy fragments"
+echo "${status_html}" | grep -q 'href="/dashboard-classic"' || fail "status page does not link classic dashboard"
+echo "${status_html}" | grep -q "/fragments/dashboard-v5" || fail "status page does not load lazy fragments"
 if echo "${status_html}" | grep -qi "http-equiv=.*refresh"; then
     fail "status page still uses full-page meta refresh"
 fi
 echo "timezone: Europe/Moscow (UTC+03:00)"
 
 info "status fragments"
-fragments_json="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/fragments/status")"
-echo "${fragments_json}" | jq -e '.fragments["system-card"] | contains("status-ring")' >/dev/null \
-    || fail "status fragments do not include system card"
-echo "${fragments_json}" | jq -e '.fragments["connection-card"] | contains("Current connection")' >/dev/null \
+fragments_json="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/fragments/dashboard-v5")"
+echo "${fragments_json}" | jq -e '.fragments["v5-overview"] | contains("Gateway")' >/dev/null \
+    || fail "status fragments do not include overview"
+echo "${fragments_json}" | jq -e '.fragments["v5-current"] | contains("Current connection")' >/dev/null \
+    || fail "status fragments do not include current connection"
+echo "${fragments_json}" | jq -e '.fragments["v5-health"] | contains("Health indicators")' >/dev/null \
+    || fail "status fragments do not include health"
+echo "${fragments_json}" | jq -e '.fragments["v5-events"] | contains("Event timeline")' >/dev/null \
+    || fail "status fragments do not include events"
+
+info "classic dashboard"
+classic_html="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/dashboard-classic")"
+echo "${classic_html}" | grep -q "proxy-xray status" || fail "classic dashboard title is missing"
+echo "${classic_html}" | grep -q "/fragments/status" || fail "classic dashboard does not load lazy fragments"
+echo "${classic_html}" | grep -q 'href="/"' || fail "classic dashboard does not link main dashboard"
+classic_fragments_json="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/fragments/status")"
+echo "${classic_fragments_json}" | jq -e '.fragments["system-card"] | contains("status-ring")' >/dev/null \
+    || fail "classic fragments do not include system card"
+echo "${classic_fragments_json}" | jq -e '.fragments["connection-card"] | contains("Current connection")' >/dev/null \
     || fail "status fragments do not include connection card"
-echo "${fragments_json}" | jq -e '.fragments["health-panel"] | contains("Health indicators")' >/dev/null \
+echo "${classic_fragments_json}" | jq -e '.fragments["health-panel"] | contains("Health indicators")' >/dev/null \
     || fail "status fragments do not include health panel"
-echo "${fragments_json}" | jq -e '.fragments["logs-panel"] | contains("Recent events")' >/dev/null \
+echo "${classic_fragments_json}" | jq -e '.fragments["logs-panel"] | contains("Recent events")' >/dev/null \
     || fail "status fragments do not include logs panel"
 
-info "dashboard v5"
+info "dashboard v5 alias"
 dashboard_v5_html="$(curl -fsS --max-time 10 "http://${PROXY_HOST}:${STATUS_PORT}/dashboard-v5")"
-echo "${dashboard_v5_html}" | grep -q "proxy-xray dashboard v5" || fail "dashboard v5 title is missing"
+echo "${dashboard_v5_html}" | grep -q "proxy-xray status" || fail "dashboard v5 title is missing"
 echo "${dashboard_v5_html}" | grep -q "Current connection" || fail "dashboard v5 does not show current connection"
 echo "${dashboard_v5_html}" | grep -q "Health indicators" || fail "dashboard v5 does not show health indicators"
 echo "${dashboard_v5_html}" | grep -q "Event timeline" || fail "dashboard v5 does not show event timeline"

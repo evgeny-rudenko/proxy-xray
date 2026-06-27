@@ -16,12 +16,14 @@
 
 ## Что уже реализовано
 
-Вариант 5 реализован как второй тестовый dashboard:
+Вариант 5 сначала был реализован как второй тестовый dashboard, а затем стал основным экраном статуса:
 
+- `/`
+- `/status`
 - `/dashboard-v5`
 - alias `/v5`
 - lazy fragments endpoint `/fragments/dashboard-v5`
-- переход с основного dashboard по кнопке `V5`
+- предыдущий dashboard сохранен как `/dashboard-classic`
 
 ## Идеи для дальнейшего UI
 

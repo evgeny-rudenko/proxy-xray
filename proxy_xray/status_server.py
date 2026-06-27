@@ -1029,8 +1029,8 @@ def render_status_html():
       </div>
     </div>
     <div class="header-actions">
-      <a class="icon-button" href="/" title="Refresh">R</a>
-      <a class="icon-button" href="/dashboard-v5" title="Experimental dashboard V5">V5</a>
+      <a class="icon-button" href="/dashboard-classic" title="Refresh">R</a>
+      <a class="text-button" href="/" title="Main dashboard">Main</a>
       <a class="icon-button" href="/json" title="Open JSON">J</a>
       <a class="icon-button" href="/logs" title="Open logs">L</a>
       <a class="icon-button" href="/diagnostics" title="Diagnostics">D</a>
@@ -1127,7 +1127,7 @@ def render_dashboard_v5_html():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>proxy-xray dashboard v5</title>
+  <title>proxy-xray status</title>
   <style>
     :root {{
       color-scheme: light;
@@ -1245,12 +1245,12 @@ def render_dashboard_v5_html():
     <div class="v5-brand">
       <div class="v5-mark">XR</div>
       <div>
-        <h1>proxy-xray dashboard v5</h1>
+        <h1>proxy-xray status</h1>
         <div class="v5-subline" data-fragment="v5-subline">{fragments["v5-subline"]}</div>
       </div>
     </div>
     <nav class="v5-actions">
-      <a class="v5-button primary" href="/">Main dashboard</a>
+      <a class="v5-button primary" href="/dashboard-classic">Classic dashboard</a>
       <a class="v5-button" href="/servers/live">Live</a>
       <a class="v5-button" href="/diagnostics">Diagnostics</a>
       <a class="v5-button" href="/client">QR</a>
@@ -1419,11 +1419,11 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         args = STATUS_ARGS
-        if self.path in ("/", "/status"):
-            self.send_bytes(render_status_html(), "text/html; charset=utf-8")
-            return
-        if self.path in ("/dashboard-v5", "/v5"):
+        if self.path in ("/", "/status", "/dashboard-v5", "/v5"):
             self.send_bytes(render_dashboard_v5_html(), "text/html; charset=utf-8")
+            return
+        if self.path in ("/dashboard-classic", "/classic"):
+            self.send_bytes(render_status_html(), "text/html; charset=utf-8")
             return
         if self.path == "/fragments/status":
             data = json.dumps(

@@ -226,14 +226,16 @@ The image seeds bundled assets. Runtime refresh happens on schedule, but compose
 
 Available endpoints:
 
-- `/` - HTML dashboard.
-- `/dashboard-v5` - experimental second dashboard for UI/layout testing.
+- `/` - primary operator dashboard.
+- `/status` - alias for the primary dashboard.
+- `/dashboard-v5` - alias for the primary dashboard kept for bookmarked test links.
+- `/dashboard-classic` - previous dashboard layout kept for comparison.
 - `/client` - LAN VLESS connection string and QR code.
 - `/servers/live` - tested live servers.
 - `/servers/all` - all candidates.
 - `/json` - machine-readable status.
-- `/fragments/status` - small HTML fragments used for in-place dashboard updates.
-- `/fragments/dashboard-v5` - small HTML fragments used by the experimental dashboard.
+- `/fragments/dashboard-v5` - small HTML fragments used for primary dashboard updates.
+- `/fragments/status` - small HTML fragments used by the classic dashboard.
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes and DNS probes.
 - `/diagnostics.json` - machine-readable sanitized diagnostic output.
 - `/diagnostics/bundle` - downloadable sanitized diagnostic JSON.
