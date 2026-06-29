@@ -174,11 +174,6 @@ def select_standby_pool(
 ):
     size = normalize_pool_size(size)
     result = []
-    active_extra_uris = {
-        candidate_uri(candidate)
-        for candidate in active_pool or []
-        if candidate.get("source") == "extra" and candidate_uri(candidate)
-    }
     excluded = {candidate_uri(candidate) for candidate in active_pool or [] if candidate_uri(candidate)}
     seen_uris = set(excluded)
     host_counts = {}
@@ -193,17 +188,6 @@ def select_standby_pool(
         max_per_host=extra_max_per_host,
         now=now,
     )
-    if not extra_reserve and active_extra_uris:
-        extra_reserve = select_extra_reserve(
-            candidates,
-            seen_uris - active_extra_uris,
-            host_counts,
-            size=min(extra_reserve_per_slot, size - len(result)),
-            require_live=extra_require_live,
-            max_age=extra_max_age,
-            max_per_host=extra_max_per_host,
-            now=now,
-        )
     result.extend(extra_reserve)
     if len(result) >= size:
         return result

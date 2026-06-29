@@ -187,7 +187,7 @@ class PoolSelectionTest(unittest.TestCase):
         self.assertNotIn("vless://active-extra", [item["uri"] for item in pool])
         self.assertEqual(1, sum(1 for item in pool if item["source"] == "extra"))
 
-    def test_standby_pool_reuses_active_extra_when_no_other_live_extra_exists(self):
+    def test_standby_pool_does_not_reuse_active_extra_when_no_other_live_extra_exists(self):
         now = time.time()
         active_extra = candidate_with_host("active-extra", "vless://active-extra", "same.example.com", source="extra", last_ok_at=now)
         subscription = candidate_with_host("sub", "vless://sub", "sub.example.com", last_ok_at=now)
@@ -203,8 +203,8 @@ class PoolSelectionTest(unittest.TestCase):
             now=now,
         )
 
-        self.assertIn("vless://active-extra", [item["uri"] for item in pool])
-        self.assertEqual(1, sum(1 for item in pool if item["source"] == "extra"))
+        self.assertEqual(["vless://sub"], [item["uri"] for item in pool])
+        self.assertEqual(0, sum(1 for item in pool if item["source"] == "extra"))
 
 
 if __name__ == "__main__":

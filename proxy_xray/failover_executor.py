@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 
 from .failover import evaluate_cooldown, failover_state
-from .slot_execution import rebuild_standby
+from .slot_execution import rebuild_standby, start_active_with_preflight
 from .slot_manager import (
     check_slot,
     check_slot_large_download,
@@ -251,7 +251,106 @@ def execute_failover(
             skip_remaining_loop=True,
         )
 
-    log(f"{failover_reason}; no healthy standby was available")
+    log(f"{failover_reason}; no healthy standby was available; trying cold active replacement")
+    cold_active_ok = start_active_with_preflight(
+        active_slot,
+        candidates,
+        args,
+        rules,
+        inject,
+        "cold active replacement",
+    )
+    if cold_active_ok:
+        set_switch_targets(switches, active_slot)
+        candidates = promote_candidate(candidates, active_slot.get("candidate"))
+        rebuild_standby(
+            standby_slot,
+            candidates,
+            slot_candidates(active_slot),
+            args,
+            rules,
+            inject,
+            "after cold active replacement",
+        )
+        persist_state(args, candidates, active=active_slot.get("candidate"))
+        switch_cooldown_until = time.monotonic() + args.failover_cooldown
+        active_api = xray_api_status_for_slot(active_slot, args)
+        standby_api = xray_api_status_for_slot(standby_slot, args)
+        set_status(
+            **status_candidate_fields(candidates, args.standby_max_age),
+            xray_running=slot_alive(active_slot),
+            failures=0,
+            slow_checks=0,
+            quality_slow_checks=0,
+            throughput_slow_checks=0,
+            switch_cooldown_until=time.time() + args.failover_cooldown,
+            active_pool=[public_candidate(candidate) for candidate in slot_candidates(active_slot)],
+            active_backend=slot_public_status(active_slot),
+            standby_pool=[public_candidate(candidate) for candidate in slot_candidates(standby_slot)],
+            hot_standby=slot_public_status(standby_slot),
+            active_path=active_api,
+            active_observatory=active_api,
+            standby_observatory=standby_api,
+            last_switch={
+                "time": time.time(),
+                "reason": failover_reason,
+                "kind": decision.kind,
+                "standby_used": False,
+                "standby_mode": "cold-active",
+                "from": old_active_candidate.get("tag") if old_active_candidate else None,
+                "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
+            },
+            failover_state=failover_state(
+                decision,
+                state="cooldown",
+                cooldown_until=switch_cooldown_until,
+                now_monotonic=time.monotonic(),
+                failures=0,
+                slow_checks=0,
+                quality_slow_checks=0,
+                throughput_slow_checks=0,
+            ),
+        )
+        time.sleep(args.post_switch_notify_delay)
+        ok, latency = curl_check(1080, args.health_url, args.health_timeout)
+        throughput_kbps = None
+        if ok and args.throughput_check_interval > 0:
+            throughput_ok, measured = throughput_check(1080, args.throughput_url, args.throughput_max_time)
+            if throughput_ok:
+                throughput_kbps = measured
+        if ok:
+            last_health_status = {"time": time.time(), "status": "ok", "latency": round(latency, 3)}
+            active_slot["healthy"] = True
+            active_slot["failures"] = 0
+            active_slot["last_health"] = last_health_status
+            if active_slot.get("candidate"):
+                active_slot["candidate"]["last_ok_at"] = last_health_status["time"]
+                active_slot["candidate"]["last_latency"] = latency
+            set_status(last_health=last_health_status, active_backend=slot_public_status(active_slot))
+            send_telegram_notification(
+                args,
+                native_recovery_message(failover_reason, slot_candidates(active_slot), latency, throughput_kbps),
+            )
+        if throughput_kbps:
+            last_throughput_status = {
+                "time": time.time(),
+                "status": "ok",
+                "kbps": round(throughput_kbps),
+            }
+            if active_slot.get("candidate"):
+                active_slot["candidate"]["last_throughput_kbps"] = round(throughput_kbps)
+            set_status(last_throughput=last_throughput_status)
+        return FailoverExecutionResult(
+            active_slot=active_slot,
+            standby_slot=standby_slot,
+            candidates=candidates,
+            switch_cooldown_until=switch_cooldown_until,
+            last_health_status=last_health_status,
+            last_throughput_status=last_throughput_status,
+            skip_remaining_loop=True,
+        )
+
+    log(f"{failover_reason}; no cold active replacement was healthy")
     set_status(failures=0, slow_checks=0, quality_slow_checks=0, throughput_slow_checks=0)
     set_status(
         failover_state=failover_state(

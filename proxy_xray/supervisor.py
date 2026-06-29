@@ -24,7 +24,7 @@ from .slot_manager import (
     stop_slot,
     xray_api_status_for_slot,
 )
-from .status import log, set_status, status_candidate_fields, status_snapshot
+from .status import log, mark_control_command, pop_control_commands, set_status, status_candidate_fields, status_snapshot
 from .status_publisher import set_runtime_status
 from .subscription import load_candidates
 from .tcp_switch import set_switch_targets, start_switches, stop_switches
@@ -126,6 +126,127 @@ def run(args):
     last_throughput_status = None
     switch_cooldown_until = 0.0
 
+    def manual_extra_order(extra_candidates):
+        def key(candidate):
+            quality = candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {}
+            checks = int(quality.get("checks") or 0)
+            success_rate = float(quality.get("success_rate") if checks >= 3 else 0.5)
+            consecutive_failures = int(quality.get("consecutive_failures") or 0)
+            latency = quality.get("latency_ewma")
+            if latency is None:
+                latency = candidate.get("last_latency")
+            throughput = quality.get("throughput_ewma") or candidate.get("last_throughput_kbps") or 0
+            network = (candidate.get("outbound", {}).get("streamSettings", {}).get("network") or "").lower()
+            network_order = {"grpc": 0, "tcp": 1, "xhttp": 2, "splithttp": 3, "ws": 4, "httpupgrade": 5}
+            return (
+                consecutive_failures,
+                float(latency) if latency is not None else 999999.0,
+                -float(throughput),
+                -success_rate,
+                network_order.get(network, 9),
+                candidate.get("index", 999999),
+            )
+
+        return sorted(extra_candidates, key=key)
+
+    def force_extra_active_pool(command):
+        nonlocal active_slot, standby_slot, failures, slow_checks, quality_slow_checks, throughput_slow_checks
+        nonlocal last_health_status, last_quality_status, switch_cooldown_until
+        extra_candidates = manual_extra_order(
+            [
+                candidate
+                for candidate in candidates
+                if candidate.get("source") == "extra"
+            ]
+        )
+        if not extra_candidates:
+            log("force extra pool requested; no extra candidates are configured")
+            mark_control_command(command, "failed", "no extra candidates configured")
+            return
+        log(f"force extra pool requested; staging {len(extra_candidates)} extra candidates in hot standby")
+        start_slot(standby_slot, extra_candidates, args, rules, inject, active=False)
+        time.sleep(max(2.0, float(getattr(args, "candidate_check_start_delay", 0.0))))
+        ok = False
+        latency = None
+        for attempt in range(2):
+            ok, latency = check_slot(standby_slot, args)
+            if ok:
+                break
+            if attempt == 0:
+                time.sleep(2.0)
+        if not ok:
+            log("force extra pool rejected; staged extra pool failed health preflight")
+            rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after failed force extra pool")
+            set_runtime_status(candidates, args, active_slot, standby_slot)
+            mark_control_command(command, "failed", "staged extra pool failed health preflight")
+            return
+
+        quality_ok, quality_kbps = throughput_check(standby_slot["socks_port"], args.quality_url, args.quality_max_time)
+        if not quality_ok or quality_kbps < args.quality_min_kbps:
+            log(
+                "force extra pool rejected; staged extra pool failed quality preflight: "
+                f"{quality_kbps:.0f} kbps < {args.quality_min_kbps:.0f} kbps"
+            )
+            rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after failed force extra pool")
+            set_runtime_status(candidates, args, active_slot, standby_slot)
+            mark_control_command(command, "failed", "staged extra pool failed quality preflight")
+            return
+
+        old_active_tag = active_slot["candidate"].get("tag") if active_slot.get("candidate") else None
+        active_slot, standby_slot = standby_slot, active_slot
+        set_switch_targets(switches, active_slot)
+        stop_slot(standby_slot)
+        rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after force extra pool")
+        switch_cooldown_until = time.monotonic() + args.failover_cooldown
+        failures = 0
+        slow_checks = 0
+        quality_slow_checks = 0
+        throughput_slow_checks = 0
+        last_health_status = {
+            "time": time.time(),
+            "status": "ok",
+            "latency": round(latency, 3) if latency is not None else None,
+        }
+        last_quality_status = {
+            "time": time.time(),
+            "status": "ok",
+            "kbps": round(quality_kbps),
+        }
+        set_status(
+            last_health=last_health_status,
+            last_quality=last_quality_status,
+            failures=failures,
+            slow_checks=slow_checks,
+            quality_slow_checks=quality_slow_checks,
+            throughput_slow_checks=throughput_slow_checks,
+            switch_cooldown_until=time.time() + args.failover_cooldown,
+            last_switch={
+                "time": time.time(),
+                "reason": "manual force extra pool",
+                "kind": "manual_extra_pool",
+                "standby_used": True,
+                "standby_mode": "staged-extra",
+                "from": old_active_tag,
+                "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
+            },
+            failover_state=failover_state(
+                state="cooldown",
+                cooldown_until=switch_cooldown_until,
+                now_monotonic=time.monotonic(),
+                failures=0,
+                slow_checks=0,
+                quality_slow_checks=0,
+                throughput_slow_checks=0,
+            ),
+        )
+        persist_state(args, candidates, active=active_slot.get("candidate"))
+        set_runtime_status(candidates, args, active_slot, standby_slot)
+        detail = (
+            f"staged extra pool passed health in {latency:.3f}s and quality "
+            f"{quality_kbps:.0f} kbps; active pool switched to {len(extra_candidates)} extra candidates"
+        )
+        mark_control_command(command, "done", detail)
+
     def stop(_signum, _frame):
         nonlocal stopping
         stopping = True
@@ -151,6 +272,13 @@ def run(args):
         sleep_for = loop_sleep_seconds(next_due_times)
         time.sleep(min(sleep_for, 1.0))
         now = time.monotonic()
+
+        for command in pop_control_commands():
+            if command.get("name") == "force_extra_pool":
+                force_extra_active_pool(command)
+            else:
+                log(f"unknown control command ignored: {command.get('name')}")
+                mark_control_command(command, "ignored", "unknown command")
 
         if now >= next_refresh:
             try:

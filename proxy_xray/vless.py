@@ -86,6 +86,25 @@ EU_TLDS = (
     ".uk",
 )
 
+NON_PREFERRED_REGION_MARKERS = (
+    "🇺🇦",
+    " ua ",
+    "[ua]",
+    "(ua)",
+    "-ua",
+    "_ua",
+    " ukraine",
+    " ukrainian",
+    " украина",
+    " україн",
+    " kiev",
+    " kyiv",
+)
+
+NON_PREFERRED_REGION_TLDS = (
+    ".ua",
+)
+
 NETWORK_PRIORITY = {
     "tcp": 0,
     "grpc": 2,
@@ -264,6 +283,8 @@ def is_ru_candidate(candidate, excludes):
 def region_score(candidate, prefer):
     text = normalized_candidate_text(candidate)
     host = candidate["host"].lower()
+    if host.endswith(NON_PREFERRED_REGION_TLDS) or any(marker in text for marker in NON_PREFERRED_REGION_MARKERS):
+        return 2
     if "us" in prefer:
         if host.endswith(".us") or any(marker in text for marker in US_MARKERS):
             return 0

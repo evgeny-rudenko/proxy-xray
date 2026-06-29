@@ -5,6 +5,7 @@ import time
 
 
 LOG_BUFFER = deque(maxlen=500)
+CONTROL_COMMANDS = deque()
 STATUS_LOCK = threading.Lock()
 DEFAULT_HEALTH_CHECKS = {
     "xray_process": {"status": "unknown", "label": "Xray process", "detail": "not checked yet"},
@@ -79,6 +80,40 @@ def log(message):
 def set_status(**kwargs):
     with STATUS_LOCK:
         STATUS.update(kwargs)
+
+
+def enqueue_control_command(name, payload=None):
+    command = {
+        "id": f"{int(time.time() * 1000)}-{len(CONTROL_COMMANDS)}",
+        "name": name,
+        "payload": payload or {},
+        "queued_at": time.time(),
+    }
+    with STATUS_LOCK:
+        CONTROL_COMMANDS.append(command)
+        STATUS["last_control_command"] = {
+            **command,
+            "status": "queued",
+        }
+    log(f"control command queued: {name}")
+    return command
+
+
+def pop_control_commands():
+    with STATUS_LOCK:
+        commands = list(CONTROL_COMMANDS)
+        CONTROL_COMMANDS.clear()
+    return commands
+
+
+def mark_control_command(command, status, detail=None):
+    with STATUS_LOCK:
+        STATUS["last_control_command"] = {
+            **command,
+            "status": status,
+            "detail": detail,
+            "finished_at": time.time(),
+        }
 
 
 def public_candidate(candidate):

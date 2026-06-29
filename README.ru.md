@@ -179,6 +179,14 @@ Failover может сработать из-за:
 
 При старте active slot должен пройти preflight health check до подключения публичных портов. Если первый outbound в pool мертв, он отправляется в soft quarantine и пробуется другой pool.
 
+### Ручной Extra Pool Override
+
+В верхней панели основного dashboard есть кнопка `Extra pool`. Это аварийный одноразовый override для ситуации, когда подписочные серверы массово деградируют, а приватные extra-соединения работают лучше.
+
+После клика и подтверждения supervisor сначала поднимает все `extra` VLESS-ссылки из `vless-extra.txt` в hot standby slot, немного ждет, затем проверяет через этот staged slot health и small quality download. Только если staged extra pool прошел проверки, локальные публичные порты переключаются на него. Для этой одной пересборки специально игнорируются обычный размер `active pool: 3` и ограничения по одному хосту.
+
+Дефолтная конфигурация не меняется, а штатные health checks, failover, quarantine и пересборка standby продолжают работать дальше. Для подписки это безопасно, потому что active pool уходит с подписочных кандидатов на extra-ссылки. Но уже открытые TCP-сессии могут кратко оборваться в момент финального переключения.
+
 ## State file
 
 `state.json` использует schema v2 и хранит cache кандидатов плюс bounded quality history:
@@ -232,6 +240,7 @@ Endpoints:
 - `/json` - machine-readable status;
 - `/fragments/dashboard-v5` - небольшие HTML-фрагменты для обновления основного dashboard без перезагрузки страницы;
 - `/fragments/status` - небольшие HTML-фрагменты для classic dashboard;
+- `/control/force-extra-pool` - локальный POST action для аварийной кнопки `Extra pool`;
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes и DNS probes;
 - `/diagnostics.json` - sanitized diagnostics JSON;
 - `/diagnostics/bundle` - скачиваемый sanitized diagnostics JSON;

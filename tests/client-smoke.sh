@@ -238,6 +238,7 @@ echo "${dashboard_v5_html}" | grep -q "Current connection" || fail "dashboard v5
 echo "${dashboard_v5_html}" | grep -q "Health indicators" || fail "dashboard v5 does not show health indicators"
 echo "${dashboard_v5_html}" | grep -q "Event timeline" || fail "dashboard v5 does not show event timeline"
 echo "${dashboard_v5_html}" | grep -q "/fragments/dashboard-v5" || fail "dashboard v5 does not load lazy fragments"
+echo "${dashboard_v5_html}" | grep -q "/control/force-extra-pool" || fail "dashboard v5 does not show force extra pool action"
 if echo "${dashboard_v5_html}" | grep -qi "http-equiv=.*refresh"; then
     fail "dashboard v5 still uses full-page meta refresh"
 fi

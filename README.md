@@ -183,6 +183,14 @@ Candidate checks are intentionally sequential. One random candidate is tested ev
 
 At startup the active slot must pass a preflight health check before public ports are attached to it. If the first outbound in the pool is dead, it is soft-quarantined and another pool is tried.
 
+### Manual Extra Pool Override
+
+The primary dashboard has an `Extra pool` button in the top toolbar. It is an emergency one-shot override for cases where subscription servers are globally degraded but private extra links still work better.
+
+When clicked and confirmed, the supervisor first stages all configured `extra` VLESS links from `vless-extra.txt` in the hot standby slot, waits briefly, then checks health and a small quality download through that staged slot. Only if the staged extra pool passes those checks are the public local ports switched to it. This intentionally ignores the normal `active pool: 3` size and same-host limits for that one rebuild.
+
+It does not change the default configuration, and regular health checks, failover, quarantine, and standby rebuild logic continue to run afterward. This is safe for the subscription because it moves the active pool away from subscription candidates. It can still briefly interrupt existing TCP sessions when the final switch happens.
+
 ## State File
 
 `state.json` uses schema v2 and stores candidate cache plus a bounded quality history:
@@ -236,6 +244,7 @@ Available endpoints:
 - `/json` - machine-readable status.
 - `/fragments/dashboard-v5` - small HTML fragments used for primary dashboard updates.
 - `/fragments/status` - small HTML fragments used by the classic dashboard.
+- `/control/force-extra-pool` - local POST action used by the `Extra pool` emergency override button.
 - `/diagnostics` - live direct/SOCKS/HTTP URL probes and DNS probes.
 - `/diagnostics.json` - machine-readable sanitized diagnostic output.
 - `/diagnostics/bundle` - downloadable sanitized diagnostic JSON.

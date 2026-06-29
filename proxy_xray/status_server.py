@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .diagnostics import build_diagnostics
 from .qr import qr_svg
-from .status import LOG_BUFFER, log, status_snapshot
+from .status import LOG_BUFFER, enqueue_control_command, log, status_snapshot
 
 
 STATUS_ARGS = None
@@ -385,7 +385,7 @@ def compact_health_rows(health_checks):
 
 def event_timeline_rows(logs):
     rows = []
-    for item in logs[-12:]:
+    for item in newest_logs(logs, limit=12):
         line = str(item.get("line") or "")
         lower = line.lower()
         if "fail" in lower or "timeout" in lower or "degrad" in lower:
@@ -405,6 +405,14 @@ def event_timeline_rows(logs):
     if not rows:
         rows.append('<div class="v5-empty">No events yet</div>')
     return "".join(rows)
+
+
+def newest_logs(logs, limit=14):
+    return list(reversed(list(logs or [])[-limit:]))
+
+
+def recent_log_text(logs, limit=14):
+    return "\n".join(f"{format_time(item.get('time'))} {item.get('line', '')}" for item in newest_logs(logs, limit=limit))
 
 
 def dashboard_v5_fragments(snapshot=None):
@@ -769,9 +777,7 @@ def status_fragments(snapshot=None):
         ring_value = counts.get("unknown", 0)
         ring_label = "UNKNOWN"
     server_preview = tested_live[:3]
-    log_lines = "\n".join(
-        f"{format_time(item.get('time'))} {item.get('line', '')}" for item in snapshot.get("logs", [])[-14:]
-    )
+    log_lines = recent_log_text(snapshot.get("logs", []), limit=14)
     health_copy = "Traffic is served through the active VLESS path. Direct RU routing, split DNS, LAN VLESS inbound, SOCKS and HTTP proxy checks are tracked separately."
     return {
         "header-subline": f"{html.escape(timezone_label())} · refreshed {html.escape(format_time(snapshot.get('last_health_checks_at')))} · live update 15s",
@@ -887,9 +893,7 @@ def render_status_html():
         ring_value = counts.get("unknown", 0)
         ring_label = "UNKNOWN"
     server_preview = tested_live[:3]
-    log_lines = "\n".join(
-        f"{format_time(item.get('time'))} {item.get('line', '')}" for item in snapshot.get("logs", [])[-14:]
-    )
+    log_lines = recent_log_text(snapshot.get("logs", []), limit=14)
     health_copy = "Traffic is served through the active VLESS path. Direct RU routing, split DNS, LAN VLESS inbound, SOCKS and HTTP proxy checks are tracked separately."
     fragments = status_fragments(snapshot)
     body = f"""<!doctype html>
@@ -1165,8 +1169,11 @@ def render_dashboard_v5_html():
     .v5-subline, .v5-muted, small {{ color: var(--muted); }}
     .v5-subline {{ margin-top: 4px; font-size: 13px; }}
     .v5-actions {{ display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }}
+    .v5-action-form {{ margin: 0; }}
     .v5-button {{ min-height: 34px; border: 1px solid var(--line-strong); background: rgba(255,255,255,.82); color: #273545; border-radius: 8px; padding: 7px 11px; font-size: 13px; font-weight: 750; text-decoration: none; display: inline-grid; place-items: center; }}
+    button.v5-button {{ cursor: pointer; font-family: inherit; }}
     .v5-button.primary {{ color: var(--blue); background: var(--blue-soft); border-color: #c6dcf6; }}
+    .v5-button.warn {{ color: var(--amber); background: var(--amber-soft); border-color: #efd08f; }}
     .v5-shell {{ display: grid; grid-template-columns: minmax(310px, .74fr) minmax(520px, 1.25fr) minmax(330px, .8fr); gap: 14px; align-items: start; }}
     .v5-panel {{ background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 14px; }}
     .v5-stack {{ display: grid; gap: 14px; }}
@@ -1256,6 +1263,9 @@ def render_dashboard_v5_html():
       <a class="v5-button" href="/servers/live">Live</a>
       <a class="v5-button" href="/diagnostics">Diagnostics</a>
       <a class="v5-button" href="/client">QR</a>
+      <form class="v5-action-form" method="post" action="/control/force-extra-pool">
+        <button class="v5-button warn" type="submit" title="Stage all extra VLESS connections in hot standby, test them, then switch once if healthy" onclick="return confirm('Stage all extra connections, test them, and switch active pool if healthy?')">Extra pool</button>
+      </form>
     </nav>
   </header>
 
@@ -1418,6 +1428,19 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def send_redirect(self, location):
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/control/force-extra-pool":
+            enqueue_control_command("force_extra_pool")
+            self.send_redirect("/")
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_GET(self):
         args = STATUS_ARGS
