@@ -1213,12 +1213,14 @@ def render_dashboard_v5_html():
     .v5-health-side small {{ display: block; margin-top: 3px; font-size: 11px; }}
     .v5-pool-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }}
     h3 {{ color: #4c5d6f; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }}
-    .v5-server-card {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .8fr); gap: 12px; align-items: start; min-height: 72px; }}
-    .v5-server-tag {{ font-size: 16px; font-weight: 850; overflow-wrap: anywhere; }}
-    .v5-muted {{ font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }}
+    .v5-server-card {{ display: grid; grid-template-columns: minmax(98px, 1fr) minmax(145px, .9fr); gap: 8px; align-items: start; min-height: 72px; }}
+    .v5-server-tag {{ font-size: 16px; font-weight: 850; overflow-wrap: break-word; word-break: normal; }}
+    .v5-muted {{ font-size: 12px; line-height: 1.3; overflow-wrap: break-word; word-break: normal; }}
     .v5-server-meta {{ text-align: right; display: grid; gap: 3px; }}
     .v5-server-meta strong {{ font-size: 17px; }}
     .v5-server-meta span {{ color: var(--muted); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }}
+    .v5-pool-grid .v5-server-card {{ grid-template-columns: 1fr; gap: 4px; min-height: 92px; }}
+    .v5-pool-grid .v5-server-meta {{ text-align: left; }}
     .v5-event {{ display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 10px; position: relative; }}
     .v5-event::before {{ content: ""; position: absolute; left: 76px; top: 14px; width: 8px; height: 8px; border-radius: 50%; background: #94a1ad; }}
     .v5-event.ok::before {{ background: var(--green); }}
