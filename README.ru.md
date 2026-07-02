@@ -1,5 +1,7 @@
 # proxy-xray
 
+[![Telegram](https://img.shields.io/badge/Telegram-@endominion-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/endominion)
+
 Dockerized Xray gateway для домашней локальной сети.
 
 Проект запускает Xray-Core за стабильными локальными портами, берет VLESS-серверы из подписки и локального extra-списка, держит active pool и hot standby, проверяет деградацию, переключается с плохих путей, показывает статус в Web UI и отправляет российские домены/IP напрямую.

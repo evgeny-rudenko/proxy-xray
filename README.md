@@ -1,5 +1,7 @@
 # proxy-xray
 
+[![Telegram](https://img.shields.io/badge/Telegram-@endominion-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/endominion)
+
 Dockerized Xray gateway for a home LAN.
 
 Русская версия: [README.ru.md](README.ru.md).
