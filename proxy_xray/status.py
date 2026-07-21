@@ -57,6 +57,7 @@ STATUS = {
         "cooldown_remaining": 0,
     },
     "last_switch": None,
+    "manual_extra_mode": {"active": False, "pool_size": 0, "last_removed": None},
     "quarantine_count": 0,
     "failures": 0,
     "slow_checks": 0,

@@ -168,8 +168,9 @@ def start_native_xray(
     inbound_vless_port=None,
     label="native balancer",
     update_status_config=True,
+    preserve_order=False,
 ):
-    candidates = native_candidate_order(candidates)
+    candidates = list(candidates) if preserve_order else native_candidate_order(candidates)
     config_candidates = copy.deepcopy(candidates)
     config = make_native_balancer_config(
         config_candidates,

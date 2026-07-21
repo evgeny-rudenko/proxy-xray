@@ -6,6 +6,7 @@ from .candidate_checker import candidate_check_enabled, random_check_delay, run_
 from .failover import evaluate_failover, failover_state
 from .failover_executor import execute_failover
 from .health import build_health_checks
+from .manual_extra import manual_extra_order, remaining_extra_candidates
 from .pool import select_active_pool
 from .scheduler import due_times, initial_schedule, loop_sleep_seconds
 from .state import load_state, persist_state
@@ -35,6 +36,7 @@ from .vless import (
     quarantine_candidate,
 )
 from .xray_process import curl_check, throughput_check
+from .xray_api import candidate_by_runtime_tag
 
 
 def run(args):
@@ -125,33 +127,112 @@ def run(args):
     last_quality_status = None
     last_throughput_status = None
     switch_cooldown_until = 0.0
+    manual_extra_mode = False
 
-    def manual_extra_order(extra_candidates):
-        def key(candidate):
-            quality = candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {}
-            checks = int(quality.get("checks") or 0)
-            success_rate = float(quality.get("success_rate") if checks >= 3 else 0.5)
-            consecutive_failures = int(quality.get("consecutive_failures") or 0)
-            latency = quality.get("latency_ewma")
-            if latency is None:
-                latency = candidate.get("last_latency")
-            throughput = quality.get("throughput_ewma") or candidate.get("last_throughput_kbps") or 0
-            network = (candidate.get("outbound", {}).get("streamSettings", {}).get("network") or "").lower()
-            network_order = {"grpc": 0, "tcp": 1, "xhttp": 2, "splithttp": 3, "ws": 4, "httpupgrade": 5}
-            return (
-                consecutive_failures,
-                float(latency) if latency is not None else 999999.0,
-                -float(throughput),
-                -success_rate,
-                network_order.get(network, 9),
-                candidate.get("index", 999999),
+    def staged_extra_preflight(pool, reason):
+        staged_pool = manual_extra_order(pool)
+        removed = []
+        while staged_pool:
+            start_slot(
+                standby_slot,
+                staged_pool,
+                args,
+                rules,
+                inject,
+                active=False,
+                preserve_order=True,
             )
+            time.sleep(max(2.0, float(getattr(args, "candidate_check_start_delay", 0.0))))
+            ok = False
+            latency = None
+            for attempt in range(2):
+                ok, latency = check_slot(standby_slot, args)
+                if ok:
+                    break
+                if attempt == 0:
+                    time.sleep(2.0)
 
-        return sorted(extra_candidates, key=key)
+            quality_ok = False
+            quality_kbps = 0.0
+            if ok:
+                quality_ok, quality_kbps = throughput_check(
+                    standby_slot["socks_port"],
+                    args.quality_url,
+                    args.quality_max_time,
+                )
+            if ok and quality_ok and quality_kbps >= args.quality_min_kbps:
+                return staged_pool, latency, quality_kbps, removed
+
+            snapshot = xray_api_status_for_slot(standby_slot, args)
+            failed = candidate_by_runtime_tag(staged_pool, snapshot.get("selected_tag"))
+            failed = failed or standby_slot.get("candidate") or staged_pool[0]
+            failure_kind = "health" if not ok else "quality"
+            quarantine_candidate(failed, args.quarantine_duration, f"manual extra {failure_kind} preflight failed")
+            removed.append(failed)
+            log(
+                f"{reason}; removing failed extra candidate {failed.get('tag')} "
+                f"({failed.get('name')}); {failure_kind} preflight did not pass"
+            )
+            staged_pool = remaining_extra_candidates(staged_pool, failed)
+        return [], None, 0.0, removed
+
+    def activate_staged_extra_pool(staged_pool, latency, quality_kbps, reason, kind, removed=None):
+        nonlocal active_slot, standby_slot, failures, slow_checks, quality_slow_checks, throughput_slow_checks
+        nonlocal last_health_status, last_quality_status, switch_cooldown_until, manual_extra_mode
+        old_active_tag = active_slot["candidate"].get("tag") if active_slot.get("candidate") else None
+        active_slot, standby_slot = standby_slot, active_slot
+        set_switch_targets(switches, active_slot)
+        stop_slot(standby_slot)
+        rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, reason)
+        switch_cooldown_until = time.monotonic() + args.failover_cooldown
+        failures = 0
+        slow_checks = 0
+        quality_slow_checks = 0
+        throughput_slow_checks = 0
+        manual_extra_mode = True
+        last_health_status = {
+            "time": time.time(),
+            "status": "ok",
+            "latency": round(latency, 3) if latency is not None else None,
+        }
+        last_quality_status = {
+            "time": time.time(),
+            "status": "ok",
+            "kbps": round(quality_kbps),
+        }
+        removed = removed or []
+        set_status(
+            last_health=last_health_status,
+            last_quality=last_quality_status,
+            failures=0,
+            slow_checks=0,
+            quality_slow_checks=0,
+            throughput_slow_checks=0,
+            switch_cooldown_until=time.time() + args.failover_cooldown,
+            manual_extra_mode={
+                "active": True,
+                "pool_size": len(staged_pool),
+                "last_removed": removed[-1].get("tag") if removed else None,
+            },
+            last_switch={
+                "time": time.time(),
+                "reason": reason,
+                "kind": kind,
+                "standby_used": True,
+                "standby_mode": "staged-extra",
+                "from": old_active_tag,
+                "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
+            },
+            failover_state=failover_state(
+                state="cooldown",
+                cooldown_until=switch_cooldown_until,
+                now_monotonic=time.monotonic(),
+            ),
+        )
+        persist_state(args, candidates, active=active_slot.get("candidate"))
+        set_runtime_status(candidates, args, active_slot, standby_slot)
 
     def force_extra_active_pool(command):
-        nonlocal active_slot, standby_slot, failures, slow_checks, quality_slow_checks, throughput_slow_checks
-        nonlocal last_health_status, last_quality_status, switch_cooldown_until
         extra_candidates = manual_extra_order(
             [
                 candidate
@@ -164,88 +245,76 @@ def run(args):
             mark_control_command(command, "failed", "no extra candidates configured")
             return
         log(f"force extra pool requested; staging {len(extra_candidates)} extra candidates in hot standby")
-        start_slot(standby_slot, extra_candidates, args, rules, inject, active=False)
-        time.sleep(max(2.0, float(getattr(args, "candidate_check_start_delay", 0.0))))
-        ok = False
-        latency = None
-        for attempt in range(2):
-            ok, latency = check_slot(standby_slot, args)
-            if ok:
-                break
-            if attempt == 0:
-                time.sleep(2.0)
-        if not ok:
-            log("force extra pool rejected; staged extra pool failed health preflight")
+        staged_pool, latency, quality_kbps, removed = staged_extra_preflight(extra_candidates, "force extra pool")
+        if not staged_pool:
+            log("force extra pool rejected; no extra candidate passed staged preflight")
             rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after failed force extra pool")
             set_runtime_status(candidates, args, active_slot, standby_slot)
-            mark_control_command(command, "failed", "staged extra pool failed health preflight")
+            mark_control_command(command, "failed", "no extra candidate passed staged preflight")
             return
-
-        quality_ok, quality_kbps = throughput_check(standby_slot["socks_port"], args.quality_url, args.quality_max_time)
-        if not quality_ok or quality_kbps < args.quality_min_kbps:
-            log(
-                "force extra pool rejected; staged extra pool failed quality preflight: "
-                f"{quality_kbps:.0f} kbps < {args.quality_min_kbps:.0f} kbps"
-            )
-            rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after failed force extra pool")
-            set_runtime_status(candidates, args, active_slot, standby_slot)
-            mark_control_command(command, "failed", "staged extra pool failed quality preflight")
-            return
-
-        old_active_tag = active_slot["candidate"].get("tag") if active_slot.get("candidate") else None
-        active_slot, standby_slot = standby_slot, active_slot
-        set_switch_targets(switches, active_slot)
-        stop_slot(standby_slot)
-        rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "after force extra pool")
-        switch_cooldown_until = time.monotonic() + args.failover_cooldown
-        failures = 0
-        slow_checks = 0
-        quality_slow_checks = 0
-        throughput_slow_checks = 0
-        last_health_status = {
-            "time": time.time(),
-            "status": "ok",
-            "latency": round(latency, 3) if latency is not None else None,
-        }
-        last_quality_status = {
-            "time": time.time(),
-            "status": "ok",
-            "kbps": round(quality_kbps),
-        }
-        set_status(
-            last_health=last_health_status,
-            last_quality=last_quality_status,
-            failures=failures,
-            slow_checks=slow_checks,
-            quality_slow_checks=quality_slow_checks,
-            throughput_slow_checks=throughput_slow_checks,
-            switch_cooldown_until=time.time() + args.failover_cooldown,
-            last_switch={
-                "time": time.time(),
-                "reason": "manual force extra pool",
-                "kind": "manual_extra_pool",
-                "standby_used": True,
-                "standby_mode": "staged-extra",
-                "from": old_active_tag,
-                "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
-            },
-            failover_state=failover_state(
-                state="cooldown",
-                cooldown_until=switch_cooldown_until,
-                now_monotonic=time.monotonic(),
-                failures=0,
-                slow_checks=0,
-                quality_slow_checks=0,
-                throughput_slow_checks=0,
-            ),
+        activate_staged_extra_pool(
+            staged_pool,
+            latency,
+            quality_kbps,
+            "manual force extra pool",
+            "manual_extra_pool",
+            removed=removed,
         )
-        persist_state(args, candidates, active=active_slot.get("candidate"))
-        set_runtime_status(candidates, args, active_slot, standby_slot)
         detail = (
             f"staged extra pool passed health in {latency:.3f}s and quality "
-            f"{quality_kbps:.0f} kbps; active pool switched to {len(extra_candidates)} extra candidates"
+            f"{quality_kbps:.0f} kbps; active pool switched to {len(staged_pool)} extra candidates"
         )
         mark_control_command(command, "done", detail)
+
+    def recover_manual_extra_pool(decision):
+        nonlocal manual_extra_mode
+        snapshot = xray_api_status_for_slot(active_slot, args)
+        failed = candidate_by_runtime_tag(slot_candidates(active_slot), snapshot.get("selected_tag"))
+        failed = failed or active_slot.get("candidate")
+        remaining = remaining_extra_candidates(slot_candidates(active_slot), failed)
+        if failed:
+            quarantine_candidate(failed, args.quarantine_duration, decision.reason)
+            log(
+                f"manual extra pool detected failed selected outbound {failed.get('tag')} "
+                f"({failed.get('name')}); staging {len(remaining)} remaining extra candidates"
+            )
+        if not remaining:
+            manual_extra_mode = False
+            set_status(manual_extra_mode={"active": False, "pool_size": 0, "last_removed": (failed or {}).get("tag")})
+            log("manual extra pool exhausted; falling back to normal hot standby")
+            return False
+
+        staged_pool, latency, quality_kbps, removed = staged_extra_preflight(remaining, "manual extra recovery")
+        if not staged_pool:
+            manual_extra_mode = False
+            rebuild_standby(
+                standby_slot,
+                candidates,
+                slot_candidates(active_slot),
+                args,
+                rules,
+                inject,
+                "manual extra recovery failed",
+            )
+            check_slot(standby_slot, args)
+            set_status(manual_extra_mode={"active": False, "pool_size": 0, "last_removed": (failed or {}).get("tag")})
+            log("manual extra recovery found no healthy extra pool; falling back to normal hot standby")
+            return False
+
+        removed = ([failed] if failed else []) + removed
+        activate_staged_extra_pool(
+            staged_pool,
+            latency,
+            quality_kbps,
+            "manual extra recovery",
+            "manual_extra_recovery",
+            removed=removed,
+        )
+        log(
+            f"manual extra recovery switched to {len(staged_pool)} verified extra candidates; "
+            f"quality {quality_kbps:.0f} kbps"
+        )
+        return True
 
     def stop(_signum, _frame):
         nonlocal stopping
@@ -323,6 +392,10 @@ def run(args):
                 set_status(xray_running=False)
             else:
                 ok, latency = curl_check(1080, args.health_url, args.health_timeout)
+                if not ok and manual_extra_mode:
+                    log("manual extra pool health probe failed; retrying once before removing an outbound")
+                    time.sleep(2.0)
+                    ok, latency = curl_check(1080, args.health_url, args.health_timeout)
                 if ok:
                     failures = 0
                     active_slot["healthy"] = True
@@ -498,6 +571,8 @@ def run(args):
         )
 
         if decision.triggered:
+            if manual_extra_mode and recover_manual_extra_pool(decision):
+                continue
             result = execute_failover(
                 args=args,
                 decision=decision,
@@ -526,6 +601,8 @@ def run(args):
             slow_checks = result.slow_checks
             quality_slow_checks = result.quality_slow_checks
             throughput_slow_checks = result.throughput_slow_checks
+            manual_extra_mode = False
+            set_status(manual_extra_mode={"active": False, "pool_size": 0, "last_removed": None})
             if result.skip_remaining_loop:
                 continue
 

@@ -15,6 +15,17 @@ def candidate_by_tag(candidates, tag):
     return None
 
 
+def candidate_by_runtime_tag(candidates, tag):
+    match = re.fullmatch(r"proxy-(extra|sub)-(\d+)", tag or "")
+    if match:
+        source = "extra" if match.group(1) == "extra" else "subscription"
+        source_candidates = [candidate for candidate in candidates if candidate.get("source") == source]
+        index = int(match.group(2))
+        if index < len(source_candidates):
+            return source_candidates[index]
+    return candidate_by_tag(candidates, tag)
+
+
 def parse_balancer_select_tags(output):
     tags = []
     in_selects = False
@@ -84,7 +95,7 @@ def balancer_snapshot(candidates, args, api_port, timeout=None, balancer_tag="au
     error = result.stderr.strip()
     selected_tag = parse_balancer_selected_tag(output)
     select_tags = parse_balancer_select_tags(output)
-    selected = candidate_by_tag(candidates, selected_tag) if selected_tag else None
+    selected = candidate_by_runtime_tag(candidates, selected_tag) if selected_tag else None
     fallback = candidates[0] if candidates else None
     status = "ok" if result.returncode == 0 else "fail"
     if result.returncode != 0:
@@ -104,9 +115,9 @@ def balancer_snapshot(candidates, args, api_port, timeout=None, balancer_tag="au
         "selected_tag": selected_tag,
         "selected": public_candidate(selected) if selected else None,
         "selects": [
-            public_candidate(candidate_by_tag(candidates, tag))
+            public_candidate(candidate_by_runtime_tag(candidates, tag))
             for tag in select_tags
-            if candidate_by_tag(candidates, tag)
+            if candidate_by_runtime_tag(candidates, tag)
         ],
         "fallback": public_candidate(fallback) if fallback else None,
         "duration": round(time.monotonic() - started, 3),

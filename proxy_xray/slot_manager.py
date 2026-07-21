@@ -108,7 +108,7 @@ def candidate_label(candidate):
     return candidate.get("tag") or candidate.get("name") or f"{candidate.get('host')}:{candidate.get('port')}"
 
 
-def start_slot(slot, candidates, args, rules, inject, active=False):
+def start_slot(slot, candidates, args, rules, inject, active=False, preserve_order=False):
     candidates = normalize_slot_candidates(candidates)
     if not candidates:
         stop_slot(slot)
@@ -127,6 +127,7 @@ def start_slot(slot, candidates, args, rules, inject, active=False):
         inbound_vless_port=slot["vless_port"],
         label=f"{slot['name']} {'active' if active else 'hot standby'}",
         update_status_config=active,
+        preserve_order=preserve_order,
     )
     fallback = ordered[0]
     slot["proc"] = proc

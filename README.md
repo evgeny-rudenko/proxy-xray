@@ -189,9 +189,9 @@ At startup the active slot must pass a preflight health check before public port
 
 The primary dashboard has an `Extra pool` button in the top toolbar. It is an emergency one-shot override for cases where subscription servers are globally degraded but private extra links still work better.
 
-When clicked and confirmed, the supervisor first stages all configured `extra` VLESS links from `vless-extra.txt` in the hot standby slot, waits briefly, then checks health and a small quality download through that staged slot. Only if the staged extra pool passes those checks are the public local ports switched to it. This intentionally ignores the normal `active pool: 3` size and same-host limits for that one rebuild.
+When clicked and confirmed, the supervisor first stages all configured `extra` VLESS links from `vless-extra.txt` in the hot standby slot, waits briefly, then checks health and a small quality download through that staged slot. Only if the staged extra pool passes those checks are the public local ports switched to it. This intentionally ignores the normal `active pool: 3` size and same-host limits for that one rebuild. Stable TCP/Reality and TCP/TLS transports are preferred over gRPC and XHTTP in this emergency mode.
 
-It does not change the default configuration, and regular health checks, failover, quarantine, and standby rebuild logic continue to run afterward. This is safe for the subscription because it moves the active pool away from subscription candidates. It can still briefly interrupt existing TCP sessions when the final switch happens.
+While the manual extra pool is active, a failed health probe is retried once. If the retry also fails, the supervisor identifies the outbound selected by Xray, quarantines only that transport, stages and verifies the remaining extra links in standby, and switches to the reduced extra pool. It returns to the regular subscription standby only when no verified extra transport remains. Existing TCP sessions can still be interrupted during a slot switch.
 
 ## State File
 
