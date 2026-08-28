@@ -2,6 +2,7 @@ import re
 import time
 from urllib.parse import urlparse
 
+from .dns_runtime import dns_transport_snapshot
 from .health import curl_probe, dns_probe
 from .status import status_snapshot
 
@@ -74,9 +75,16 @@ def probe_url(url, args):
 
 def build_dns_diagnostics(args):
     timeout = getattr(args, "diagnostic_probe_timeout", None) or getattr(args, "diagnostics_timeout", 4)
+    route = getattr(args, "dns_global_route", "direct")
     return {
         "ru": dns_probe("RU DNS", "yandex.ru", "127.0.0.1", timeout),
-        "global": dns_probe("Global DNS", "google.com", "127.0.0.1", timeout),
+        "global": dns_probe(
+            "Global DNS via VLESS" if route != "direct" else "Global DNS",
+            "google.com",
+            "127.0.0.1",
+            timeout,
+            detail=f"google.com via {route}",
+        ),
     }
 
 
@@ -129,6 +137,7 @@ def build_diagnostics(args):
             "pool_size": hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or []),
         },
         "dns": build_dns_diagnostics(args),
+        "dns_transport": dns_transport_snapshot(args),
         "probes": [probe_url(url, args) for url in urls],
     }
     return redact_value(data)

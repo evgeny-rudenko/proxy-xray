@@ -54,6 +54,10 @@ Then edit `.env` and `vless-extra.txt`.
 # VLESS subscription URL from your provider.
 XRAY_SUB_URL=https://example.com/subscription
 
+# Non-RU DNS transport: socks (recommended), http, or direct.
+# direct completely disables DNS encapsulation through VLESS.
+DNS_GLOBAL_ROUTE=socks
+
 # UUID for local LAN clients connecting to this gateway on port 10086.
 # Generate once with: python3 -c 'import uuid; print(uuid.uuid4())'
 # Use the same value in V2RayTun / VLESS client config.
@@ -217,8 +221,30 @@ The default compose routes Russian resources directly:
 Split DNS is enabled:
 
 - RU domains use `77.88.8.8,77.88.8.1`;
-- other domains use `8.8.8.8,1.1.1.1`;
-- upstream DNS is queried directly, not through Xray.
+- other domains use `8.8.8.8,1.1.1.1` through the active VLESS pool;
+- `DNS_GLOBAL_ROUTE=socks` sends DNS-over-TCP through the SOCKS proxy on `1080`;
+- `DNS_GLOBAL_ROUTE=http` uses HTTP `CONNECT` through the HTTP proxy on `8123`;
+- `DNS_GLOBAL_ROUTE=direct` disables encapsulation and restores direct DNS-over-TCP;
+- direct fallback for normal global domains is disabled by default, preventing silent DNS bypass around VLESS;
+- positive responses are cached in memory and stale cache entries cover short failover windows.
+
+The subscription URL host and all VLESS endpoint hosts are maintained in an automatic bootstrap list and resolved directly over DNS-over-TCP. This prevents a startup loop where DNS waits for VLESS while VLESS waits for DNS. Only connection-infrastructure names use bootstrap resolution.
+
+Before the proxy switch becomes ready, startup queries temporarily use direct DNS-over-TCP so an initial subscription redirect can complete. Normal global DNS automatically moves to the configured VLESS transport after port `1080` or `8123` is ready.
+
+The user-facing proxies remain independent:
+
+- SOCKS5 `1080`: clients must pass the hostname to the proxy. In Firefox enable `Proxy DNS when using SOCKS v5`;
+- HTTP proxy `8123`: HTTPS destinations are passed by hostname through `CONNECT`;
+- LAN VLESS `10086`: destination hostnames pass through the inbound VLESS connection and active outbound.
+
+To disable DNS-over-VLESS without changing any proxy or routing settings, set:
+
+```shell
+DNS_GLOBAL_ROUTE=direct
+```
+
+and recreate the container.
 
 Xray sniffing is enabled on SOCKS, HTTP, and LAN VLESS inbounds with `routeOnly`, so TLS SNI / HTTP Host can be used for routing without rewriting the destination.
 

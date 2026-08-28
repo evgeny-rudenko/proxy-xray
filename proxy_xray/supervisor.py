@@ -3,6 +3,7 @@ import time
 
 from .assets import prepare_assets, refresh_assets, set_asset_status
 from .candidate_checker import candidate_check_enabled, random_check_delay, run_random_candidate_check
+from .dns_runtime import dns_transport_snapshot, set_dns_proxy_ready, write_bootstrap_domains
 from .failover import evaluate_failover, failover_state
 from .failover_executor import execute_failover
 from .health import build_health_checks
@@ -40,6 +41,8 @@ from .xray_api import candidate_by_runtime_tag
 
 
 def run(args):
+    set_dns_proxy_ready(args, False)
+    set_status(dns_transport=dns_transport_snapshot(args))
     prepare_assets(args)
     if args.asset_refresh_on_start:
         refresh_assets(args, reason="startup")
@@ -56,6 +59,8 @@ def run(args):
     startup_subscription_status = status_snapshot().get("last_subscription_status") or {}
 
     candidates = native_candidate_order(candidates)
+    bootstrap = write_bootstrap_domains(args, candidates)
+    log(f"DNS bootstrap list updated with {len(bootstrap)} endpoint domains")
     active_slot = fresh_slot(SLOTS[0])
     standby_slot = fresh_slot(SLOTS[1])
     switches = {}
@@ -79,6 +84,7 @@ def run(args):
             active=True,
         )
     switches = start_switches(active_slot, args)
+    set_dns_proxy_ready(args, True)
     rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "startup")
     persist_state(args, candidates, active=active_slot.get("candidate"))
     set_status(
@@ -319,6 +325,7 @@ def run(args):
     def stop(_signum, _frame):
         nonlocal stopping
         stopping = True
+        set_dns_proxy_ready(args, False)
         stop_switches(switches)
         stop_slot(active_slot)
         stop_slot(standby_slot)
@@ -355,6 +362,8 @@ def run(args):
                 new_candidates = load_candidates(args, candidates, state=state, allow_proxy=True)
                 next_refresh = time.monotonic() + args.refresh_interval
                 candidates = native_candidate_order(new_candidates)
+                bootstrap = write_bootstrap_domains(args, candidates)
+                log(f"DNS bootstrap list updated with {len(bootstrap)} endpoint domains")
                 refresh_slot_candidate_refs((active_slot, standby_slot), candidates)
                 if not slot_alive(standby_slot) or not slot_candidates(standby_slot):
                     rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "subscription refresh")
@@ -532,7 +541,11 @@ def run(args):
                 last_throughput_status or snapshot.get("last_throughput"),
                 snapshot.get("last_subscription_status"),
             )
-            set_status(health_checks=health_checks, last_health_checks_at=time.time())
+            set_status(
+                health_checks=health_checks,
+                dns_transport=dns_transport_snapshot(args),
+                last_health_checks_at=time.time(),
+            )
             next_diagnostics_check = time.monotonic() + args.check_interval
 
         if args.active_path_interval > 0 and now >= next_active_path_check:

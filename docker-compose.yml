@@ -10,6 +10,9 @@ services:
       - --dns-ru
       - "77.88.8.8,77.88.8.1"
       - --dns-split-ru
+      - --dns-global-route
+      - "${DNS_GLOBAL_ROUTE:-socks}"
+      - --no-dns-global-direct-fallback
       - --sub-url
       - "${XRAY_SUB_URL:?set XRAY_SUB_URL in .env}"
       - --sub-extra-file

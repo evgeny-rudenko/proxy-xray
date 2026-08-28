@@ -433,6 +433,7 @@ def dashboard_v5_fragments(snapshot=None):
     sources = snapshot.get("sources") or {}
     assets = snapshot.get("assets") or {}
     subscription_fetch = snapshot.get("subscription_fetch") or {}
+    dns_transport = snapshot.get("dns_transport") or {}
     last_throughput = snapshot.get("last_throughput") or {}
     tested_live = snapshot.get("tested_live_candidates") or []
     active_pool = snapshot.get("active_pool") or []
@@ -514,6 +515,7 @@ def dashboard_v5_fragments(snapshot=None):
           <div><span>Geo assets</span><strong>{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</strong><small>last {html.escape(short_time(assets.get('last_success_at')))}</small></div>
           <div><span>Subscription</span><strong>{html.escape(short_time(snapshot.get('last_subscription_success_at')))}</strong><small>{html.escape(str(subscription_fetch.get('last_method') or '-'))} / {html.escape(str(subscription_fetch.get('mode') or '-'))}</small></div>
           <div><span>Direct RU</span><strong>enabled</strong><small>geoip:ru · geosite:category-ru</small></div>
+          <div><span>Global DNS</span><strong>{html.escape(str(dns_transport.get('global_route') or 'direct'))}</strong><small>last {html.escape(str(dns_transport.get('last_route') or '-'))} / {html.escape(str(dns_transport.get('last_status') or '-'))}</small></div>
           <div><span>Failover</span><strong>{html.escape(str(failover.get('state') or 'idle'))}</strong><small>{html.escape(str(failover_note))}</small></div>
         </div>""",
         "v5-events": f"""
@@ -744,6 +746,7 @@ def status_fragments(snapshot=None):
     health_checks = snapshot.get("health_checks") or {}
     counts = health_counts(health_checks)
     subscription_fetch = snapshot.get("subscription_fetch") or {}
+    dns_transport = snapshot.get("dns_transport") or {}
     active_backend_candidate = active_backend.get("candidate") or {}
     hot_standby_candidate = hot_standby.get("candidate") or {}
     current = active_selected or active_backend_candidate or ((snapshot.get("active_pool") or [{}])[0])
@@ -837,6 +840,7 @@ def status_fragments(snapshot=None):
           <div class="info-box"><div class="label">Geo assets</div><div class="metric-value">{html.escape(str((assets.get('last_status') or {}).get('status') or '-'))}</div><div class="metric-note">last downloaded {html.escape(short_time(assets.get('last_success_at')))}</div></div>
           <div class="info-box"><div class="label">Subscription fetch</div><div class="metric-value">{html.escape(str(subscription_fetch.get('last_method') or '-'))}</div><div class="metric-note">{html.escape(str(subscription_fetch.get('mode') or '-'))}</div></div>
           <div class="info-box"><div class="label">Direct RU routing</div><div class="metric-value">enabled</div><div class="metric-note">geoip:ru / geosite:category-ru</div></div>
+          <div class="info-box"><div class="label">Global DNS</div><div class="metric-value">{html.escape(str(dns_transport.get('global_route') or 'direct'))}</div><div class="metric-note">last {html.escape(str(dns_transport.get('last_route') or '-'))} / {html.escape(str(dns_transport.get('last_status') or '-'))}</div></div>
         </div>""",
         "logs-panel": f"""
         <div class="panel-head"><div><h2>Recent events</h2><div class="panel-subtitle">Latest operational log entries.</div></div><a class="chip" href="/logs">plain logs</a></div>

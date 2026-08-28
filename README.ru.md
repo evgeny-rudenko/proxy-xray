@@ -50,6 +50,10 @@ mkdir -p assets
 # VLESS subscription URL от провайдера.
 XRAY_SUB_URL=https://example.com/subscription
 
+# DNS для не-RU доменов: socks (рекомендуется), http или direct.
+# direct полностью отключает DNS-инкапсуляцию через VLESS.
+DNS_GLOBAL_ROUTE=socks
+
 # UUID для локальных LAN-клиентов, которые подключаются к этому gateway на порт 10086.
 # Сгенерировать один раз: python3 -c 'import uuid; print(uuid.uuid4())'
 # Этот же UUID нужно указать в V2RayTun / VLESS client config.
@@ -213,8 +217,30 @@ Failover может сработать из-за:
 Split DNS:
 
 - RU-домены используют `77.88.8.8,77.88.8.1`;
-- остальные домены используют `8.8.8.8,1.1.1.1`;
-- upstream DNS опрашивается напрямую, не через Xray.
+- остальные домены используют `8.8.8.8,1.1.1.1` через активный VLESS-пул;
+- `DNS_GLOBAL_ROUTE=socks` отправляет DNS-over-TCP через SOCKS proxy `1080`;
+- `DNS_GLOBAL_ROUTE=http` делает то же через HTTP `CONNECT` proxy `8123`;
+- `DNS_GLOBAL_ROUTE=direct` отключает инкапсуляцию и возвращает прямой DNS-over-TCP;
+- прямой fallback для обычных global-доменов по умолчанию выключен, чтобы DNS незаметно не обходил VLESS;
+- положительные ответы кэшируются в памяти, а stale-кэш используется во время короткого failover.
+
+Домены URL подписки и VLESS endpoint автоматически записываются в bootstrap-список и разрешаются напрямую через DNS-over-TCP. Это необходимо для запуска Xray: без bootstrap DNS возникла бы петля, в которой DNS ожидает VLESS, а VLESS ожидает DNS. Bootstrap содержит только имена инфраструктуры соединения; обычные зарубежные домены через него не проходят.
+
+До появления рабочего proxy switch startup-запросы также временно используют прямой DNS-over-TCP. Это позволяет пройти HTTP redirect подписки и собрать первый активный пул. После поднятия порта `1080` или `8123` обычный global DNS автоматически переходит в выбранный VLESS transport.
+
+Пользовательские прокси продолжают работать независимо:
+
+- SOCKS5 `1080`: для DNS на стороне gateway клиент должен передавать доменное имя proxy. В Firefox включите `Proxy DNS when using SOCKS v5`;
+- HTTP proxy `8123`: HTTPS-запрос передаёт имя назначения через `CONNECT`, поэтому локальному провайдеру клиента DNS назначения не раскрывается;
+- LAN VLESS `10086`: доменное имя назначения проходит через входящий VLESS и далее через активный outbound.
+
+Если DNS через VLESS вызывает проблему, установите в `.env`:
+
+```shell
+DNS_GLOBAL_ROUTE=direct
+```
+
+и пересоздайте контейнер. Остальные proxy и routing-настройки менять не требуется.
 
 Xray sniffing включен на SOCKS, HTTP и LAN VLESS inbound с `routeOnly`, поэтому TLS SNI / HTTP Host используются для routing без перезаписи destination.
 

@@ -67,6 +67,13 @@ STATUS = {
     "candidates": [],
     "tested_live_candidates": [],
     "routing": {"direct_domains": [], "direct_ips": [], "balancers": []},
+    "dns_transport": {
+        "enabled": False,
+        "global_route": "direct",
+        "direct_fallback": False,
+        "last_status": None,
+        "last_route": None,
+    },
 }
 
 

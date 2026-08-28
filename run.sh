@@ -27,6 +27,9 @@ usage() {
     echo "    --dns-global <ip[,ip...]>             Global upstream DNS servers"
     echo "    --dns-ru <ip[,ip...]>                 RU upstream DNS servers"
     echo "    --dns-split-ru                        Resolve .ru, .su and .рф through RU DNS"
+    echo "    --dns-global-route <direct|socks|http> Global DNS transport, default: direct"
+    echo "    --dns-global-direct-fallback          Allow global DNS to bypass VLESS on failure"
+    echo "    --no-dns-global-direct-fallback       Never bypass VLESS for normal global DNS"
     echo "    --throughput-check-interval <seconds> Active path throughput interval"
     echo "    --pool-extra-reserve-per-slot <count> Reserve live extra candidates per pool"
     echo "    --pool-extra-max-per-host <count>     Max reserved extra candidates per host"
@@ -97,7 +100,33 @@ add_rule() {
 
 start_dns() {
     if [ -n "${DNS_SPLIT_RU}" ]; then
-        /dns-split-proxy.py --listen 0.0.0.0 --port 53 --dns-global "${DNS_GLOBAL}" --dns-ru "${DNS_RU}" &
+        local authority subscription_host
+        authority="${SUB_URL#*://}"
+        authority="${authority%%/*}"
+        authority="${authority##*@}"
+        if [[ "${authority}" == \[*\]* ]]; then
+            subscription_host="${authority#\[}"
+            subscription_host="${subscription_host%%\]*}"
+        else
+            subscription_host="${authority%%:*}"
+        fi
+        printf '%s\n' "${subscription_host}" >"${DNS_BOOTSTRAP_FILE}"
+        DNS_RELAY_ARGS=(
+            --listen 0.0.0.0
+            --port 53
+            --dns-global "${DNS_GLOBAL}"
+            --dns-ru "${DNS_RU}"
+            --global-route "${DNS_GLOBAL_ROUTE}"
+            --bootstrap-file "${DNS_BOOTSTRAP_FILE}"
+            --status-file "${DNS_STATUS_FILE}"
+            --proxy-ready-file "${DNS_PROXY_READY_FILE}"
+        )
+        if [ -n "${DNS_GLOBAL_DIRECT_FALLBACK}" ]; then
+            DNS_RELAY_ARGS+=(--global-direct-fallback)
+        else
+            DNS_RELAY_ARGS+=(--no-global-direct-fallback)
+        fi
+        /dns-split-proxy.py "${DNS_RELAY_ARGS[@]}" &
         printf 'nameserver 127.0.0.1\noptions ndots:0\n' >/etc/resolv.conf
     else
         printf 'nameserver %s\noptions ndots:0\n' "$(first_csv_value "${DNS_GLOBAL}")" >/etc/resolv.conf
@@ -140,6 +169,11 @@ POOL_EXTRA_REQUIRE_LIVE_SET=""
 DNS_GLOBAL="8.8.8.8"
 DNS_RU="77.88.8.8"
 DNS_SPLIT_RU=""
+DNS_GLOBAL_ROUTE="direct"
+DNS_GLOBAL_DIRECT_FALLBACK=""
+DNS_BOOTSTRAP_FILE="/tmp/proxy-xray-dns-bootstrap.txt"
+DNS_STATUS_FILE="/tmp/proxy-xray-dns-status.json"
+DNS_PROXY_READY_FILE="/tmp/proxy-xray-dns-proxy-ready"
 
 THROUGHPUT_CHECK_INTERVAL=""
 THROUGHPUT_URL=""
@@ -271,6 +305,22 @@ while [ $# -gt 0 ]; do
             ;;
         --dns-split-ru)
             DNS_SPLIT_RU=1
+            shift
+            ;;
+        --dns-global-route)
+            need_value "$@"
+            case "$2" in
+                direct|socks|http) DNS_GLOBAL_ROUTE="$2" ;;
+                *) echo "invalid --dns-global-route: $2" >&2; exit 1 ;;
+            esac
+            shift 2
+            ;;
+        --dns-global-direct-fallback)
+            DNS_GLOBAL_DIRECT_FALLBACK=1
+            shift
+            ;;
+        --no-dns-global-direct-fallback)
+            DNS_GLOBAL_DIRECT_FALLBACK=""
             shift
             ;;
         --throughput-check-interval)
@@ -420,10 +470,25 @@ RULES_FILE=/tmp/proxy-xray-rules.json
 INJECT_FILE=/tmp/proxy-xray-inject.json
 printf '%s\n' "${Jrules}" >"${RULES_FILE}"
 printf '{}\n' >"${INJECT_FILE}"
+rm -f "${DNS_PROXY_READY_FILE}"
 
 start_dns
 
-SUPERVISOR_ARGS=(--sub-url "${SUB_URL}" --dns "$(first_csv_value "${DNS_GLOBAL}")" --rules-file "${RULES_FILE}" --inject-file "${INJECT_FILE}")
+SUPERVISOR_ARGS=(
+    --sub-url "${SUB_URL}"
+    --dns "$(first_csv_value "${DNS_GLOBAL}")"
+    --dns-global-route "${DNS_GLOBAL_ROUTE}"
+    --dns-bootstrap-file "${DNS_BOOTSTRAP_FILE}"
+    --dns-status-file "${DNS_STATUS_FILE}"
+    --dns-proxy-ready-file "${DNS_PROXY_READY_FILE}"
+    --rules-file "${RULES_FILE}"
+    --inject-file "${INJECT_FILE}"
+)
+if [ -n "${DNS_GLOBAL_DIRECT_FALLBACK}" ]; then
+    SUPERVISOR_ARGS+=(--dns-global-direct-fallback)
+else
+    SUPERVISOR_ARGS+=(--no-dns-global-direct-fallback)
+fi
 append_arg "${SUB_EXTRA_FILE}" --extra-file
 for extra_vless in "${SUB_EXTRA_VLESS[@]}"; do
     SUPERVISOR_ARGS+=(--extra-vless "${extra_vless}")

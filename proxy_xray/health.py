@@ -57,7 +57,7 @@ def tcp_probe(label, host, port, timeout):
         return health_item("fail", label, str(exc), time.monotonic() - started)
 
 
-def dns_probe(label, domain, server, timeout):
+def dns_probe(label, domain, server, timeout, detail=None):
     command = ["nslookup", domain, server]
     started = time.monotonic()
     try:
@@ -67,7 +67,7 @@ def dns_probe(label, domain, server, timeout):
     latency = time.monotonic() - started
     output = f"{result.stdout}\n{result.stderr}"
     if result.returncode == 0 and "Address" in output:
-        return health_item("ok", label, domain, latency)
+        return health_item("ok", label, detail or domain, latency)
     return health_item("fail", label, f"failed resolving {domain}", latency)
 
 
@@ -105,6 +105,8 @@ def telegram_health(args, timeout):
 
 def build_health_checks(args, xray_running, last_health, last_quality, last_throughput, subscription_status):
     timeout = args.diagnostics_timeout
+    dns_global_route = getattr(args, "dns_global_route", "direct")
+    dns_global_label = "Global DNS via VLESS" if dns_global_route != "direct" else "Global DNS"
     checks = {
         "xray_process": health_item("ok" if xray_running else "fail", "Xray process", "running" if xray_running else "stopped"),
         "socks_proxy": status_from_existing("SOCKS proxy", last_health),
@@ -117,7 +119,13 @@ def build_health_checks(args, xray_running, last_health, last_quality, last_thro
         if args.inbound_vless
         else health_item("unknown", "LAN VLESS inbound", "disabled"),
         "dns_ru": dns_probe("RU DNS", "yandex.ru", "127.0.0.1", timeout),
-        "dns_global": dns_probe("Global DNS", "google.com", "127.0.0.1", timeout),
+        "dns_global": dns_probe(
+            dns_global_label,
+            "google.com",
+            "127.0.0.1",
+            timeout,
+            detail=f"google.com via {dns_global_route}",
+        ),
         "telegram": telegram_health(args, timeout),
     }
     return checks

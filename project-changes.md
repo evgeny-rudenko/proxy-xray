@@ -379,3 +379,9 @@ This avoids exposing the home server to the public internet and avoids GitHub Ac
 - Xray observatory latency data is not currently exposed by `xray api bi`; selected outbound data is normalized into candidate history only after successful slot checks.
 - Throughput checks measure the active shared proxy path, not every candidate.
 - Direct-routing behavior is verified by generated config and smoke access, not by packet capture.
+# DNS-over-VLESS transport
+
+- Added configurable `DNS_GLOBAL_ROUTE=direct|socks|http` handling.
+- Non-RU DNS-over-TCP can now traverse the active VLESS pool through either the public SOCKS switch or HTTP CONNECT proxy.
+- RU DNS remains direct, while subscription and VLESS endpoint domains use an automatically refreshed direct bootstrap list to prevent DNS startup loops.
+- Added positive/stale DNS cache, disabled silent direct fallback for ordinary global queries, runtime status reporting, dashboard visibility, tests, and operator documentation.

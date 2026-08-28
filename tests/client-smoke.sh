@@ -94,6 +94,8 @@ echo "${status_json}" | jq -e '.routing.direct_domains | index("geosite:category
     || fail "geosite:category-ru is not configured as direct"
 echo "${status_json}" | jq -e '.routing.direct_ips | index("geoip:ru")' >/dev/null \
     || fail "geoip:ru is not configured as direct"
+echo "${status_json}" | jq -e '.dns_transport.enabled == true and .dns_transport.global_route == "socks" and .dns_transport.direct_fallback == false' >/dev/null \
+    || fail "global DNS is not configured through VLESS/SOCKS without direct fallback"
 echo "${status_json}" | jq -e 'if .active_path == null then true else (.active_path.balancer == "auto" and ((.active_path.status | type) == "string")) end' >/dev/null \
     || fail "active_path status is invalid"
 echo "${status_json}" | jq -e 'if .active_observatory == null then true else ((.active_observatory.api_port | type) == "number" and ((.active_observatory.status | type) == "string")) end' >/dev/null \
@@ -106,6 +108,8 @@ echo "${diagnostics_json}" | jq -e '.probes | type == "array" and length >= 1' >
     || fail "diagnostics probes are missing"
 echo "${diagnostics_json}" | jq -e '.summary.failover_state.state | type == "string"' >/dev/null \
     || fail "diagnostics failover state is missing"
+echo "${diagnostics_json}" | jq -e '.dns_transport.global_route == "socks"' >/dev/null \
+    || fail "diagnostics DNS transport is not socks"
 if echo "${diagnostics_json}" | grep -E 'vless://|[0-9]{6,}:[A-Za-z0-9_-]{20,}|/sub/[A-Za-z0-9_-]+' >/dev/null; then
     fail "diagnostics output contains sensitive-looking data"
 fi
@@ -134,6 +138,12 @@ assert_speed "socks throughput" -x "socks5h://${PROXY_HOST}:${SOCKS_PORT}"
 info "HTTP proxy"
 assert_204 "http health" -x "http://${PROXY_HOST}:${HTTP_PORT}"
 assert_speed "http throughput" -x "http://${PROXY_HOST}:${HTTP_PORT}"
+
+info "split DNS"
+nslookup youtube.com "${PROXY_HOST}" | grep -q "Address:" || fail "global DNS through VLESS failed"
+nslookup yandex.ru "${PROXY_HOST}" | grep -q "Address:" || fail "direct RU DNS failed"
+echo "global DNS: resolved through configured VLESS transport"
+echo "RU DNS: resolved through direct transport"
 
 info "LAN VLESS inbound"
 cat >/tmp/lan-vless-client.json <<EOF
@@ -279,7 +289,7 @@ assert module.split_upstreams("8.8.8.8,1.1.1.1") == [("8.8.8.8", 53), ("1.1.1.1"
 
 calls = []
 
-def fake_query_tcp(packet, upstream, timeout):
+def fake_query_tcp(packet, upstream, timeout, **_kwargs):
     calls.append(upstream)
     if upstream[0] == "broken":
         raise OSError("simulated failure")
