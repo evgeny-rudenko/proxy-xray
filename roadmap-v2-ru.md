@@ -1295,3 +1295,190 @@ v2 можно считать готовой, когда:
 - профиль задается одним env/flag;
 - README объясняет tradeoff;
 - tests проверяют хотя бы mapping профиля в thresholds.
+
+## 14. [DPI] Устойчивость к поведенческой TLS-фильтрации
+
+Тег: `DPI`.
+
+Статус: исследование и backlog; функциональность из этого раздела пока не считается реализованной.
+
+Дата исследования: 2026-08-28.
+
+Источники:
+
+- материал, предоставленный для исследования: https://publish.obsidian.md/zapret/VLESS/dpi-tls-june-2026;
+- актуальная версия материала на основной wiki: https://wiki.zapret.moe/VLESS/dpi-tls-june-2026;
+- указанный авторами первоисточник наблюдений: https://habr.com/ru/articles/1044396/;
+- официальная документация Xray Observatory: https://xtls.github.io/config/observatory.html;
+- официальная документация Xray Mux/XUDP: https://xtls.github.io/en/config/outbound.html.
+
+### 14.1. [DPI][P1] Карантин по failure domain, а не только по VLESS URI
+
+Проблема: несколько кандидатов могут вести на один хост, IP или SNI и отличаться только транспортом, портом или параметрами URI. Если DPI ограничил весь TLS-путь, переключение на соседний candidate того же узла может не восстановить соединение и создаст дополнительные рукопожатия.
+
+Что добавить:
+
+- вычислять для кандидата `failure_domain` минимум из endpoint host/IP и SNI;
+- по возможности учитывать подсеть и ASN;
+- хранить связь candidate -> failure domain в runtime state;
+- при признаках DPI freeze помещать в короткий групповой карантин все кандидаты домена;
+- выбирать standby из другого failure domain;
+- не считать разные транспорты одного физического extra-сервера независимыми отказоустойчивыми узлами.
+
+Рекомендуемые интервалы:
+
+- первичный карантин: 120 секунд;
+- повторный или подтвержденный TLS freeze: до 600 секунд;
+- текущий обычный candidate quarantine продолжает использоваться для индивидуальных ошибок сервера.
+
+Критерий приемки:
+
+- fail одного URI не вызывает немедленный перебор других URI того же заблокированного хоста;
+- active и hot pool по возможности состоят из разных failure domains;
+- UI и event timeline показывают групповой карантин и его причину;
+- есть unit-тесты для нескольких URI одного host/SNI.
+
+### 14.2. [DPI][P2] Стабильная политика TLS fingerprint
+
+Проблема: Xray получает fingerprint из подписки, но оператор не видит концентрацию одинаковых fingerprints и не может задать безопасную управляемую политику. Быстрая смена fingerprint на том же узле во время деградации сама может выглядеть как адаптация proxy-клиента.
+
+Что добавить:
+
+- сохранить текущий режим `provider`, в котором используется `fp` из VLESS URI;
+- добавить опциональные режимы `firefox`, `edge` и `balanced`;
+- в `balanced` детерминированно назначать один стабильный реальный preset каждому failure domain;
+- не менять fingerprint для уже работающего failure domain до плановой пересборки;
+- показывать effective fingerprint в `/json`, diagnostics и UI;
+- не использовать `randomized` и `randomizednoalpn` как автоматический default;
+- не создавать одновременно несколько дублей одного endpoint с разными ClientHello.
+
+Возможная настройка:
+
+```text
+XRAY_FINGERPRINT_POLICY=provider
+```
+
+Критерий приемки:
+
+- политика по умолчанию не изменяет данные подписки;
+- один и тот же failure domain получает стабильный fingerprint после restart;
+- fingerprint override можно отключить одним параметром;
+- тесты проверяют `provider`, явный override и deterministic `balanced`.
+
+### 14.3. [DPI][P3] Отдельный DPI-resistant rescue pool
+
+Проблема: самый быстрый transport не всегда самый устойчивый к поведенческому анализу. RAW + XTLS Vision хорошо работает со вложенным TLS, но не уменьшает количество физических TLS-соединений. TCP Mux при Vision штатно не применяется.
+
+Что добавить:
+
+- не менять основной быстрый active pool;
+- формировать небольшой rescue pool из уже доступных XHTTP и gRPC кандидатов;
+- сохранять и проверять provider XMUX settings из XHTTP URI;
+- для совместимых outbound без XTLS Vision исследовать Mux.Cool с `concurrency` 4-8;
+- для gRPC полагаться на встроенное HTTP/2 multiplexing и не добавлять второй Mux.Cool;
+- после повторного suspected DPI freeze переключаться в rescue pool из другого failure domain;
+- учитывать, что mux может снижать скорость видео и больших загрузок, поэтому не делать его глобальным default без A/B проверки.
+
+Критерий приемки:
+
+- rescue pool не расходует дополнительные subscription connections в обычном режиме сверх заданного лимита;
+- транспортные параметры из подписки не повреждаются;
+- переключение в rescue pool имеет отдельную причину в event timeline;
+- smoke-тесты проверяют XHTTP, gRPC и RAW/Vision config generation.
+
+### 14.4. [DPI][P4] Снизить TLS-шум от supervisor и Observatory
+
+Текущее хорошее свойство: `enableConcurrency=false` уже заставляет Observatory проверять outbounds последовательно.
+
+Оставшаяся проблема: Observatory использует фиксированный интервал, а supervisor дополнительно запускает health, quality, throughput и candidate probes. Совпадающие по времени проверки могут создавать повторяемый шаблон соединений к одному SNI.
+
+Что добавить:
+
+- исследовать увеличение Observatory `probeInterval` с 10 до 20-30 секунд;
+- добавить jitter к health, quality и throughput schedule;
+- не запускать несколько probes одного failure domain одновременно;
+- разнести во времени запуск active и hot slot;
+- временно прекращать фоновые probes quarantined failure domain;
+- сохранить быстрый passive failover на уже подготовленный hot standby.
+
+Критерий приемки:
+
+- расписание проверок не образует регулярный общий burst;
+- для одного SNI нет нескольких одновременных supervisor probes;
+- leastPing получает достаточно свежие данные;
+- время реального failover не ухудшается.
+
+### 14.5. [DPI][P5] Классификатор DPI freeze
+
+Проблема: текущий health-check видит fail или снижение скорости, но не различает отказ сервера, DNS-сбой, TLS freeze, ограничение после определенного объема и обычный packet loss.
+
+Что добавить:
+
+- отдельный TCP connect probe;
+- отдельный TLS handshake probe с временем этапов;
+- small и medium content probes с ожидаемым количеством байт;
+- классификацию `network-failure`, `dns-failure`, `tls-freeze`, `size-threshold`, `packet-loss`, `unknown-degradation`;
+- подтверждать DPI-класс несколькими признаками, а не одним неудачным curl;
+- передавать классификацию в failover decision, quarantine, Telegram и UI.
+
+Критерий приемки:
+
+- TCP success + TLS/content stall не записывается как обычный server down;
+- один случайный throughput `0 kbps` не создает ложный DPI incident;
+- suspected DPI переключает на другой failure domain;
+- diagnostics bundle содержит sanitized evidence классификации.
+
+### 14.6. [DPI][P6] CDN-fronted кандидат в hot standby
+
+Проблема: локальные изменения fingerprint и mux не меняют видимую DPI подсеть VPS. Если подписка уже содержит XHTTP/WS endpoint за крупным CDN, он может быть более устойчивым fallback, хотя часто имеет большую latency и меньшую throughput.
+
+Что добавить:
+
+- определять CDN-кандидатов только по надежным признакам, не по одному слову в имени;
+- при наличии проверенного CDN-fronted кандидата резервировать один слот hot pool;
+- не пытаться автоматически превращать обычный REALITY endpoint в CDN endpoint;
+- показывать `cdn-fronted`, способ определения и transport в UI;
+- оставить feature flag для полного отключения CDN preference.
+
+Ограничения:
+
+- CDN может видеть терминированный TLS-трафик;
+- тяжелый трафик может нарушать правила провайдера CDN;
+- маршрут через CDN может быть медленнее;
+- функция зависит от того, предоставляет ли подписка такие узлы.
+
+Критерий приемки:
+
+- ложная CDN-классификация не меняет pool автоматически;
+- резервирование не нарушает лимит subscription connections;
+- fallback можно отключить без изменения подписки.
+
+### 14.7. [DPI][P7] Контролируемое обновление Xray-Core и uTLS
+
+Проблема: fingerprint presets со временем устаревают. Текущий Dockerfile закрепляет Xray-Core `v26.6.1`; более новые версии нужно проверять, но нельзя автоматически ставить непроверенный `latest`.
+
+Что добавить:
+
+- вынести `XRAY_VER` в явную operator-facing build setting;
+- показывать версию Xray в diagnostics и support snapshot;
+- добавить проверку наличия новой версии без автоматического обновления;
+- собирать отдельный test image с новой версией;
+- прогонять unit tests, generated config validation и полный client smoke;
+- сохранять предыдущий image tag для rollback.
+
+Критерий приемки:
+
+- обновление Xray не происходит незаметно;
+- версия видна в UI/diagnostics;
+- новая версия проходит проверку SOCKS, HTTP, LAN VLESS, DNS, pools и failover;
+- rollback не требует восстановления runtime state.
+
+### Рекомендуемый порядок реализации [DPI]
+
+1. Failure-domain grouping и групповой quarantine.
+2. Стабильная fingerprint policy и отображение effective fingerprint.
+3. Снижение и jitter собственных probes.
+4. Классификатор DPI freeze.
+5. DPI-resistant XHTTP/gRPC rescue pool.
+6. CDN-fronted hot standby, если подписка содержит подтвержденные CDN-узлы.
+7. Контролируемое обновление Xray-Core после отдельного smoke-теста.

@@ -2,17 +2,22 @@ import json
 import os
 import time
 
-from .status import log
+from .status import log, status_snapshot
 from .util import save_json_file
 from .vless import parse_vless_uri
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_RECENT_CHECKS = 50
 
 
 def empty_state():
-    return {"schema_version": SCHEMA_VERSION, "candidates": {}, "last_selected_uri": None}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "candidates": {},
+        "last_selected_uri": None,
+        "subscription_usage": None,
+    }
 
 
 def number_or_none(value):
@@ -44,6 +49,32 @@ def normalize_recent_checks(value):
             }
         )
     return checks
+
+
+def normalize_subscription_usage(value):
+    if not isinstance(value, dict):
+        return None
+    try:
+        total = int(value.get("total_bytes"))
+        upload = max(0, int(value.get("upload_bytes", 0)))
+        download = max(0, int(value.get("download_bytes", 0)))
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    expires_at = number_or_none(value.get("expires_at"))
+    fetched_at = number_or_none(value.get("fetched_at"))
+    used = upload + download
+    return {
+        "upload_bytes": upload,
+        "download_bytes": download,
+        "used_bytes": used,
+        "total_bytes": total,
+        "remaining_bytes": max(0, total - used),
+        "usage_percent": round(used * 100 / total, 1),
+        "expires_at": int(expires_at) if expires_at and expires_at > 0 else None,
+        "fetched_at": fetched_at,
+    }
 
 
 def ewma(values, alpha=0.35):
@@ -111,6 +142,7 @@ def normalize_state(state):
         if isinstance(uri, str) and uri
     }
     normalized.setdefault("last_selected_uri", None)
+    normalized["subscription_usage"] = normalize_subscription_usage(state.get("subscription_usage"))
     return normalized
 
 
@@ -261,6 +293,7 @@ def persist_state(args, candidates, active=None):
         "updated_at": now,
         "last_selected_uri": last_selected_uri,
         "last_balancer_fallback_uri": candidates[0]["uri"] if candidates else None,
+        "subscription_usage": normalize_subscription_usage(status_snapshot().get("subscription_usage")),
         "candidates": saved,
     }
     try:

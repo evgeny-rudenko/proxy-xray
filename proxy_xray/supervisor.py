@@ -50,6 +50,8 @@ def run(args):
     rules = load_json_file(args.rules_file, {"rules": []})
     inject = load_json_file(args.inject_file, {})
     state = load_state(args.state_file)
+    if state.get("subscription_usage"):
+        set_status(subscription_usage=state["subscription_usage"])
     candidates = []
     while not candidates:
         candidates = load_candidates(args, state=state, allow_proxy=False)

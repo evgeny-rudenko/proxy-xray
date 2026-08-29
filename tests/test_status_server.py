@@ -1,7 +1,7 @@
 import unittest
 
 from proxy_xray.status import enqueue_control_command, pop_control_commands, status_snapshot
-from proxy_xray.status_server import event_timeline_rows, recent_log_text
+from proxy_xray.status_server import event_timeline_rows, recent_log_text, subscription_quota_badge
 
 
 class StatusServerLogOrderTest(unittest.TestCase):
@@ -29,6 +29,20 @@ class StatusServerLogOrderTest(unittest.TestCase):
         self.assertEqual("queued", status_snapshot()["last_control_command"]["status"])
         self.assertEqual([command], pop_control_commands())
         self.assertEqual([], pop_control_commands())
+
+    def test_subscription_quota_badge_shows_usage_without_provider_url(self):
+        rendered = subscription_quota_badge(
+            {
+                "used_bytes": 1024 * 1024 * 1024,
+                "total_bytes": 10 * 1024 * 1024 * 1024,
+                "usage_percent": 10,
+                "expires_at": None,
+            }
+        )
+
+        self.assertIn("1.0 GB / 10.0 GB", rendered)
+        self.assertIn("10.0% used", rendered)
+        self.assertNotIn("http", rendered)
 
 
 if __name__ == "__main__":

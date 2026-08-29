@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from proxy_xray.state import load_state, persist_state
+from proxy_xray.status import set_status
 
 
 def candidate(uri="vless://candidate", last_ok_at=None, last_fail_at=None, latency=None):
@@ -35,13 +36,13 @@ class StateTest(unittest.TestCase):
 
             state = load_state(state_path)
 
-            self.assertEqual(2, state["schema_version"])
+            self.assertEqual(3, state["schema_version"])
             self.assertEqual({}, state["candidates"])
             self.assertFalse(os.path.exists(state_path))
             backups = [name for name in os.listdir(tmpdir) if name.startswith("state.json.corrupt.")]
             self.assertEqual(1, len(backups))
 
-    def test_legacy_state_is_normalized_to_schema_v2(self):
+    def test_legacy_state_is_normalized_to_current_schema(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")
             with open(state_path, "w", encoding="utf-8") as handle:
@@ -61,7 +62,7 @@ class StateTest(unittest.TestCase):
             state = load_state(state_path)
 
             record = state["candidates"]["vless://candidate"]
-            self.assertEqual(2, state["schema_version"])
+            self.assertEqual(3, state["schema_version"])
             self.assertEqual([], record["recent_checks"])
             self.assertEqual(0, record["quality"]["checks"])
 
@@ -78,7 +79,7 @@ class StateTest(unittest.TestCase):
             state = load_state(state_path)
             record = state["candidates"]["vless://candidate"]
 
-            self.assertEqual(2, state["schema_version"])
+            self.assertEqual(3, state["schema_version"])
             self.assertEqual(2, len(record["recent_checks"]))
             self.assertEqual(2, record["quality"]["checks"])
             self.assertEqual(1, record["quality"]["successes"])
@@ -101,6 +102,27 @@ class StateTest(unittest.TestCase):
 
             self.assertEqual(101.0, record["last_xray_selected_at"])
             self.assertEqual("active-a", record["last_xray_selected_slot"])
+
+    def test_persist_state_keeps_subscription_quota(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "state.json")
+            args = SimpleNamespace(state_file=state_path)
+            set_status(
+                subscription_usage={
+                    "upload_bytes": 10,
+                    "download_bytes": 90,
+                    "total_bytes": 1000,
+                    "expires_at": 1234567890,
+                    "fetched_at": 100.0,
+                }
+            )
+
+            persist_state(args, [candidate()], active=None)
+
+            usage = load_state(state_path)["subscription_usage"]
+            self.assertEqual(100, usage["used_bytes"])
+            self.assertEqual(900, usage["remaining_bytes"])
+            self.assertEqual(10.0, usage["usage_percent"])
 
 
 if __name__ == "__main__":

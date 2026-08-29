@@ -151,6 +151,23 @@ def bytes_text(value):
     return f"{amount:.1f} {units[unit]}"
 
 
+def subscription_quota_badge(usage):
+    if not isinstance(usage, dict) or not usage.get("total_bytes"):
+        return ""
+    used = bytes_text(usage.get("used_bytes"))
+    total = bytes_text(usage.get("total_bytes"))
+    percent = min(100, max(0, float(usage.get("usage_percent") or 0)))
+    expires_at = usage.get("expires_at")
+    expiry = format_time(expires_at) if expires_at else "no expiry date"
+    return (
+        '<div class="v5-quota" title="Subscription traffic limit">'
+        f'<div><span>Traffic</span><strong>{html.escape(used)} / {html.escape(total)}</strong></div>'
+        f'<small>{percent:.1f}% used · until {html.escape(expiry)}</small>'
+        f'<div class="v5-quota-track"><i style="width:{percent:.1f}%"></i></div>'
+        "</div>"
+    )
+
+
 def assets_table(assets):
     items = assets.get("items") or {}
     rows = []
@@ -433,6 +450,7 @@ def dashboard_v5_fragments(snapshot=None):
     sources = snapshot.get("sources") or {}
     assets = snapshot.get("assets") or {}
     subscription_fetch = snapshot.get("subscription_fetch") or {}
+    subscription_usage = snapshot.get("subscription_usage") or {}
     dns_transport = snapshot.get("dns_transport") or {}
     last_throughput = snapshot.get("last_throughput") or {}
     tested_live = snapshot.get("tested_live_candidates") or []
@@ -470,6 +488,7 @@ def dashboard_v5_fragments(snapshot=None):
     failover_note = failover.get("reason") or f"cooldown {failover.get('cooldown_remaining', 0)}s"
     return {
         "v5-subline": f"{html.escape(timezone_label())} · refreshed {html.escape(format_time(snapshot.get('last_health_checks_at')))} · live update 15s",
+        "v5-quota": subscription_quota_badge(subscription_usage),
         "v5-overview": f"""
         <div class="v5-state {gateway_class}">
           <span class="v5-state-dot"></span>
@@ -1170,6 +1189,14 @@ def render_dashboard_v5_html():
     .v5-mark {{ display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; background: #111b27; color: #fff; font-size: 18px; font-weight: 850; }}
     h1, h2, h3, p {{ margin: 0; }}
     h1 {{ font-size: 25px; line-height: 1.05; }}
+    .v5-title-line {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
+    .v5-quota {{ width: 260px; border: 1px solid #c6dcf6; border-radius: 8px; background: var(--blue-soft); padding: 6px 9px; }}
+    .v5-quota > div:first-child {{ display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }}
+    .v5-quota span {{ color: var(--blue); font-size: 10px; text-transform: uppercase; font-weight: 850; }}
+    .v5-quota strong {{ font-size: 13px; line-height: 1.1; }}
+    .v5-quota small {{ display: block; margin-top: 2px; font-size: 10px; line-height: 1.2; }}
+    .v5-quota-track {{ height: 4px; margin-top: 5px; border-radius: 999px; overflow: hidden; background: #c8dcf5; }}
+    .v5-quota-track i {{ display: block; height: 100%; border-radius: inherit; background: #258ae0; }}
     .v5-subline, .v5-muted, small {{ color: var(--muted); }}
     .v5-subline {{ margin-top: 4px; font-size: 13px; }}
     .v5-actions {{ display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }}
@@ -1258,7 +1285,7 @@ def render_dashboard_v5_html():
     <div class="v5-brand">
       <div class="v5-mark">XR</div>
       <div>
-        <h1>proxy-xray status</h1>
+        <div class="v5-title-line"><h1>proxy-xray status</h1><div data-fragment="v5-quota">{fragments["v5-quota"]}</div></div>
         <div class="v5-subline" data-fragment="v5-subline">{fragments["v5-subline"]}</div>
       </div>
     </div>
@@ -1310,6 +1337,7 @@ def render_dashboard_v5_html():
   const intervalMs = 15000;
   const keys = [
     "v5-subline",
+    "v5-quota",
     "v5-overview",
     "v5-current",
     "v5-health",

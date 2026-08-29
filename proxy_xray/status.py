@@ -42,6 +42,7 @@ STATUS = {
     "last_health_checks_at": None,
     "last_subscription_status": None,
     "subscription_fetch": {"mode": None, "proxy": None, "proxy_allowed": False, "last_method": None},
+    "subscription_usage": None,
     "assets": None,
     "last_candidate_check": None,
     "next_candidate_check_at": None,
