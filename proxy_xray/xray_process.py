@@ -169,6 +169,7 @@ def start_native_xray(
     label="native balancer",
     update_status_config=True,
     preserve_order=False,
+    inbound_listen=None,
 ):
     candidates = list(candidates) if preserve_order else native_candidate_order(candidates)
     config_candidates = copy.deepcopy(candidates)
@@ -184,6 +185,9 @@ def start_native_xray(
         api_port=api_port,
         inbound_vless_port=inbound_vless_port,
     )
+    if inbound_listen:
+        for inbound in config["inbounds"]:
+            inbound["listen"] = inbound_listen
     write_config(config_path, config)
     if update_status_config:
         set_status(**status_config_fields(config))

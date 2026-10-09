@@ -5,10 +5,11 @@ import random
 import socket
 import subprocess
 import time
+from dataclasses import dataclass
 
 from .status import log, set_status, status_candidate_fields
 from .vless import candidate_is_quarantined, native_candidate_order, primary_candidate, standby_candidate
-from .xray_process import XRAY, curl_check, terminate_process
+from .xray_process import XRAY, curl_check, terminate_process, throughput_check
 
 
 def random_check_delay(args):
@@ -69,6 +70,55 @@ def check_candidate(candidate, args):
         except OSError:
             pass
     return ok, latency
+
+
+@dataclass(frozen=True)
+class ExtraProbeResult:
+    ok: bool
+    latency: float = None
+    kbps: float = 0.0
+    reason: str = ""
+
+
+def check_extra_candidate(candidate, args, cancelled=lambda: False):
+    port = free_local_port()
+    config_path = write_candidate_config(candidate, port)
+    proc = None
+    try:
+        proc = subprocess.Popen([XRAY, "-c", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(max(1.0, args.candidate_check_start_delay))
+        successes = failures = 0
+        latency = None
+        # Pin every request to this transport; a balancer snapshot cannot attribute a failed request.
+        for attempt in range(4):
+            if cancelled():
+                return ExtraProbeResult(False, reason="cancelled")
+            ok, latency = curl_check(port, args.health_url, args.candidate_check_timeout)
+            successes = successes + 1 if ok else 0
+            failures = failures + 1 if not ok else 0
+            if successes >= 2:
+                break
+            if failures >= 2:
+                return ExtraProbeResult(False, reason="two consecutive health failures")
+            if attempt < 3:
+                time.sleep(1.0)
+        if successes < 2:
+            return ExtraProbeResult(False, reason="health did not stabilize")
+        for attempt in range(2):
+            if cancelled():
+                return ExtraProbeResult(False, reason="cancelled")
+            ok, kbps = throughput_check(port, args.quality_url, args.quality_max_time)
+            if ok and kbps >= args.quality_min_kbps:
+                return ExtraProbeResult(True, latency, kbps)
+            if attempt == 0:
+                time.sleep(1.0)
+        return ExtraProbeResult(False, reason="two quality checks below threshold")
+    finally:
+        terminate_process(proc)
+        try:
+            os.unlink(config_path)
+        except OSError:
+            pass
 
 
 def weighted_choice(candidates, args):

@@ -1,3 +1,4 @@
+import os
 import time
 
 from .status import log, public_candidate
@@ -53,6 +54,11 @@ def slot_alive(slot):
 
 def stop_slot(slot):
     terminate_process(slot.get("proc"))
+    if slot.get("temporary_config"):
+        try:
+            os.unlink(slot["config_path"])
+        except OSError:
+            pass
     slot["proc"] = None
     slot["healthy"] = False
     slot["candidate"] = None
@@ -128,6 +134,7 @@ def start_slot(slot, candidates, args, rules, inject, active=False, preserve_ord
         label=f"{slot['name']} {'active' if active else 'hot standby'}",
         update_status_config=active,
         preserve_order=preserve_order,
+        inbound_listen=slot.get("inbound_listen"),
     )
     fallback = ordered[0]
     slot["proc"] = proc

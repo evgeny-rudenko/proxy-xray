@@ -24,6 +24,7 @@ def evaluate_failover(
     quality_slow_checks=0,
     throughput_slow_checks=0,
     standby_ready=False,
+    allow_fast_failover=True,
 ):
     if failures >= args.max_failures:
         return FailoverDecision(
@@ -34,7 +35,7 @@ def evaluate_failover(
             standby_ready=standby_ready,
         )
 
-    if args.hot_standby_fast_failures > 0 and failures >= args.hot_standby_fast_failures and standby_ready:
+    if allow_fast_failover and args.hot_standby_fast_failures > 0 and failures >= args.hot_standby_fast_failures and standby_ready:
         return FailoverDecision(
             triggered=True,
             kind="active_path_failed",

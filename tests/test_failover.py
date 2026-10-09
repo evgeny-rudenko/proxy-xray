@@ -39,6 +39,13 @@ class FailoverDecisionTest(unittest.TestCase):
 
         self.assertFalse(decision.triggered)
 
+    def test_manual_extra_waits_for_max_failures_and_reports_ready_reserve(self):
+        first = evaluate_failover(args(), failures=1, standby_ready=True, allow_fast_failover=False)
+        second = evaluate_failover(args(), failures=2, standby_ready=True, allow_fast_failover=False)
+        self.assertFalse(first.triggered)
+        self.assertTrue(first.standby_ready)
+        self.assertTrue(second.triggered)
+
     def test_latency_degradation_triggers_non_full_failure(self):
         decision = evaluate_failover(args(), slow_checks=3, standby_ready=True)
 
