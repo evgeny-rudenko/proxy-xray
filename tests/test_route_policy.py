@@ -117,7 +117,7 @@ class RoutingPolicyTest(unittest.TestCase):
         supervisor = self.supervisor(DIRECT)
         seen = []
         supervisor.core.override.side_effect = lambda mode: seen.append(mode) or True
-        def probe(port, settings):
+        def probe(port, settings, **kwargs):
             self.assertEqual(UNAVAILABLE, seen[0])
             self.assertNotEqual(SLOTS[0]["probe_ports"][DIRECT], port)
             return Probe(True, .1)
@@ -181,6 +181,8 @@ class RoutingPolicyTest(unittest.TestCase):
         supervisor.inventory.pairs = set()
         supervisor.switches = {"dns": Mock()}
         staged = Mock()
+        staged.slot = SLOTS[1]
+        staged.selected.return_value = (None, None, False)
         staged.override.return_value = True
         with patch("proxy_xray.supervisor.ChainCore", return_value=staged), patch(
             "proxy_xray.supervisor.health_at", side_effect=[Probe(False), Probe(False), Probe(True)]

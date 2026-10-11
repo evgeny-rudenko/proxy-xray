@@ -15,6 +15,7 @@ from .dns_runtime import set_dns_proxy_ready, write_bootstrap_domains
 from .health import build_health_checks
 from .route_inventory import RouteInventory
 from .route_probe import health_at
+from .route_health import probe_route, rescue_direct
 from .route_control import apply_route_policy, queue_recheck
 from .route_status import publish
 from .routes import DIRECT, CHAIN, SUBSCRIPTION, UNAVAILABLE, RoutePolicy, normalize_route_policy
@@ -89,9 +90,15 @@ class Supervisor:
                            self.inventory.direct, self.inventory.pairs)
         try:
             staged.start()
+            if old:
+                for mode, tag in old.transport_overrides.items():
+                    same_transport = (tag in staged.mapping and tag in old.mapping and
+                                      staged.mapping[tag]["uri"] == old.mapping[tag]["uri"])
+                    if same_transport and not staged.override_transport(mode, tag):
+                        raise RuntimeError("staged transport override failed")
             desired = self.policy.mode if self.policy.allows(self.policy.mode) else UNAVAILABLE
             if desired != UNAVAILABLE:
-                result = health_at(slot["probe_ports"][desired], self.args)
+                result = probe_route(staged, self.args, desired, health_at, "preflight")
                 if not result.ok:
                     if old and old.alive() and not retired:
                         log("[chain] staged configuration failed preflight; keeping old core")
@@ -99,7 +106,7 @@ class Supervisor:
                         return False
                     desired = UNAVAILABLE
                     for mode in self.policy.priority:
-                        result = health_at(slot["probe_ports"][mode], self.args)
+                        result = probe_route(staged, self.args, mode, health_at, "preflight-fallback")
                         if result.ok:
                             desired = mode
                             break
@@ -140,11 +147,23 @@ class Supervisor:
         for mode in modes:
             if mode in (CHAIN, SUBSCRIPTION) and not self.inventory.pool():
                 continue
-            result = health_at(self.core.slot["probe_ports"][mode], self.args)
+            previously_failed = self.policy.checks.get(mode, {}).get("ok") is False
+            result = self.probe_route(mode)
+            if (mode == current == DIRECT and not result.ok and
+                    self.policy.failures >= self.args.max_failures - 1):
+                recovered = rescue_direct(self.core, self.args, result.selected_before["tag"], self.probe_route)
+                if recovered:
+                    result = recovered
+                    set_status(last_direct_rescue={"time": result.time, "transport": result.selected_after})
+            if result.ok and previously_failed:
+                log(f"[chain] route check recovered route={mode} "
+                    f"transport={result.selected_after['tag']} latency_s={result.latency}")
             self.policy.observe(mode, result.ok, result.latency)
             if mode == current:
                 set_status(last_health={"time": result.time, "status": "ok" if result.ok else "fail",
-                                        "latency": result.latency})
+                                        "latency": result.latency, "reason": result.reason,
+                                        "attempts": result.attempts, "selected_before": result.selected_before,
+                                        "selected_after": result.selected_after})
         desired = self.policy.choose()
         if desired != self.policy.mode:
             failed = self.policy.failures >= self.args.max_failures
@@ -155,6 +174,9 @@ class Supervisor:
             self.set_mode(desired, reason)
             if desired in (SUBSCRIPTION, UNAVAILABLE):
                 self.queue_matrix()
+
+    def probe_route(self, mode, context="periodic"):
+        return probe_route(self.core, self.args, mode, health_at, context)
 
     def queue_matrix(self):
         requested = self.inventory.diagnostic_pairs()
@@ -186,7 +208,7 @@ class Supervisor:
         if self.policy.mode == UNAVAILABLE:
             desired = self.policy.choose()
             if desired != UNAVAILABLE:
-                actual = health_at(self.core.slot["probe_ports"][desired], self.args)
+                actual = self.probe_route(desired, context="startup-confirmation")
                 if actual.ok:
                     self.policy.observe(desired, True, actual.latency)
                     self.set_mode(desired, "startup route verified end to end")

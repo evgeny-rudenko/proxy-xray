@@ -4,8 +4,8 @@ import os
 import subprocess
 import time
 
-from .chain_config import make_chain_config
-from .routes import ROUTE_TAGS, UNAVAILABLE
+from .chain_config import BALANCERS, make_chain_config
+from .routes import DIRECT, ROUTE_TAGS, UNAVAILABLE
 from .util import save_json_file
 from .xray_api import parse_balancer_selected_tag
 from .xray_process import XRAY, terminate_process
@@ -18,6 +18,7 @@ class ChainCore:
         self.config, self.mapping = make_chain_config(exits, relays, args, slot, direct, pairs)
         self.path = f"/tmp/amsterdam-core-{slot['api_port']}.json"
         self.proc = None
+        self.transport_overrides = {}
 
     def api(self, command, *arguments):
         try:
@@ -48,6 +49,22 @@ class ChainCore:
 
     def override(self, mode):
         return self.api("bo", "-b", "egress", ROUTE_TAGS[mode]).returncode == 0
+
+    def override_transport(self, mode, tag=None):
+        if mode != DIRECT or (tag is not None and tag not in self.mapping):
+            return False
+        if tag is not None:
+            candidate = self.mapping[tag]
+            if candidate.get("source") != "extra" or not tag.startswith("exit-direct-"):
+                return False
+        arguments = (tag,) if tag is not None else ("-r",)
+        if self.api("bo", "-b", BALANCERS[mode], *arguments).returncode:
+            return False
+        if tag is None:
+            self.transport_overrides.pop(mode, None)
+        else:
+            self.transport_overrides[mode] = tag
+        return True
 
     def selected(self, balancer):
         response = self.api("bi", balancer)

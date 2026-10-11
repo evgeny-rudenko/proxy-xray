@@ -65,6 +65,8 @@ class SupervisorTest(unittest.TestCase):
         supervisor.core = Mock()
         supervisor.core.slot = SLOTS[0]
         supervisor.core.mapping = {}
+        supervisor.core.transport_overrides = {}
+        supervisor.core.selected.return_value = (None, None, False)
         supervisor.core.override.return_value = True
         supervisor.inventory = Mock()
         supervisor.inventory.pool.return_value = [{}]
@@ -128,6 +130,8 @@ class SupervisorTest(unittest.TestCase):
         supervisor.inventory.pairs = set()
         supervisor.switches = {"dns": Mock()}
         staged = Mock()
+        staged.slot = SLOTS[1]
+        staged.selected.return_value = (None, None, False)
         staged.override.return_value = True
         with patch("proxy_xray.supervisor.ChainCore", return_value=staged), patch(
             "proxy_xray.supervisor.health_at", side_effect=[Probe(False), Probe(False), Probe(False), Probe(True)]
@@ -143,6 +147,8 @@ class SupervisorTest(unittest.TestCase):
         supervisor.inventory.pairs = set()
         supervisor.switches = {"dns": Mock()}
         staged = Mock()
+        staged.slot = SLOTS[1]
+        staged.selected.return_value = (None, None, False)
         staged.override.return_value = True
         with patch("proxy_xray.supervisor.make_chain_config", return_value=({}, {})), patch(
             "proxy_xray.supervisor.ChainCore", return_value=staged

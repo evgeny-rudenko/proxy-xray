@@ -21,9 +21,23 @@ def parse_balancer_select_tags(output):
 
 
 def parse_balancer_selected_tag(output):
+    in_override = False
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- Selecting Override:"):
+            in_override = True
+            continue
+        if in_override and stripped.startswith("- "):
+            break
+        if in_override:
+            parts = stripped.split()
+            if len(parts) >= 2 and re.fullmatch(r"[A-Za-z0-9_.-]+", parts[1]):
+                return parts[1]
     tags = parse_balancer_select_tags(output)
     if tags:
         return tags[0]
+    if re.search(r"(?m)^\s*- (?:Selecting Override|Selects):", output):
+        return None
     for pattern in (
         r'selected\s*:\s*"?([A-Za-z0-9_.-]+)',
         r'selecting\s*:\s*"?([A-Za-z0-9_.-]+)',

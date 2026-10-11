@@ -1,5 +1,9 @@
 # Proxy Xray Project Changes
 
+## Direct Transport Rescue And Health Evidence
+
+Amsterdam route checks retain sanitized per-site curl/HTTP errors, timings and API selections before/after a balanced probe. After two failed active-Direct cycles, the supervisor tries at most two different gRPC/XHTTP transports sequentially on the working core, requiring two successful checks before retaining a Routing API transport override. Failure restores the previous override/native selection and follows existing failover thresholds. Staged core replacement carries the retained override forward; subscription-only policy never runs Direct rescue. API status parsing gives an explicit override precedence over native selection. README versions and regression tests cover these changes; no new public ports or direct DNS fallback are added.
+
 ## Amsterdam Routing Policy Switch
 
 The experimental Amsterdam branch now supports persistent operator policies: `auto` (Direct → Chain → Subscription) and `subscription_only` (Chain → Subscription, never Direct). The dashboard applies changes through a validated same-origin JSON POST and the sequential supervisor queue without a core restart. Startup, staged recovery, manual rechecks and candidate checks respect the same allowed-route policy. Failed persistence leaves the choice unchanged; a failed blocking override stops the core rather than serving a forbidden path. RU routing remains direct and global DNS follows the permitted route with no direct fallback. Both README versions document policy persistence, emergency egress and existing TCP-session limitations.

@@ -25,6 +25,14 @@ class XrayApiTest(unittest.TestCase):
         self.assertEqual("exit-chain-proxy-extra-3", parse_balancer_selected_tag(
             "- Selects:\n 1 exit-chain-proxy-extra-3\n"))
 
+    def test_override_is_actual_selection_not_native_principle(self):
+        self.assertEqual("exit-direct-proxy-extra-2", parse_balancer_selected_tag(
+            "- Selecting Override:\n 1 exit-direct-proxy-extra-2\n"
+            "- Selects:\n 1 exit-direct-proxy-extra-0\n"))
+
+    def test_empty_numbered_row_is_unknown_not_transport_one(self):
+        self.assertIsNone(parse_balancer_selected_tag("- Selecting Override:\n 1\n- Selects:\n 1\n"))
+
 
 if __name__ == "__main__":
     unittest.main()

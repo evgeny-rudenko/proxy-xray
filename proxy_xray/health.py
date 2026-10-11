@@ -31,7 +31,8 @@ def curl_probe(label, url, timeout, proxy=None, expected_codes=None):
     try:
         result = subprocess.run(command, text=True, capture_output=True, timeout=timeout + 2)
     except subprocess.TimeoutExpired:
-        return health_item("fail", label, f"timeout after {timeout}s", float(timeout))
+        return {**health_item("fail", label, f"timeout after {timeout}s", float(timeout)),
+                "http_code": "000", "curl_exit": None, "error_kind": "process_timeout"}
 
     parts = result.stdout.strip().split()
     code = parts[0] if parts else "000"
@@ -41,11 +42,14 @@ def curl_probe(label, url, timeout, proxy=None, expected_codes=None):
         latency = None
 
     if result.returncode == 0 and code in expected_codes:
-        return health_item("ok", label, f"HTTP {code}", latency)
+        return {**health_item("ok", label, f"HTTP {code}", latency),
+                "http_code": code, "curl_exit": 0}
     detail = f"HTTP {code}"
     if result.stderr.strip():
         detail = result.stderr.strip().splitlines()[-1]
-    return health_item("fail", label, detail, latency)
+    return {**health_item("fail", label, detail, latency),
+            "http_code": code, "curl_exit": result.returncode,
+            "error_kind": "curl" if result.returncode else "http_status"}
 
 
 def tcp_probe(label, host, port, timeout):

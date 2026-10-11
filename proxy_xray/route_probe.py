@@ -5,10 +5,14 @@ import subprocess
 import tempfile
 import time
 import socket
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
+from .diagnostics import redact_value
 from .health import curl_probe
+from .status import log
 from .xray_process import XRAY, terminate_process
 
 
@@ -18,15 +22,32 @@ class Probe:
     latency: float = None
     reason: str = ""
     time: float = 0
+    attempts: tuple = ()
+    selected_before: dict = None
+    selected_after: dict = None
 
 
-def health_at(port, args):
-    for url in (args.health_url, args.health_backup_url):
+def health_at(port, args, context="route"):
+    attempts = []
+    for site, url in (("primary", args.health_url), ("backup", args.health_backup_url)):
         item = curl_probe("route", url, args.health_timeout, proxy=f"socks5h://127.0.0.1:{port}",
                           expected_codes={"200", "204"})
+        detail = re.sub(r"(?:https?|vless)://\S+", "<redacted-url>",
+                        redact_value(str(item.get("detail", ""))))
+        attempt = {"site": site, "host": urlsplit(url).hostname, "status": item["status"],
+                   "http_code": item.get("http_code", "UNKNOWN"), "curl_exit": item.get("curl_exit"),
+                   "error_kind": item.get("error_kind"), "latency": item.get("latency"),
+                   "detail": " ".join(detail.split())[:300]}
+        attempts.append(attempt)
+        if item["status"] != "ok":
+            log(f"[chain] health request failed context={context} port={port} site={site} "
+                f"host={attempt['host']} http={attempt['http_code']} curl={attempt['curl_exit']} "
+                f"elapsed_s={attempt['latency']} kind={attempt['error_kind']} detail={attempt['detail']}")
         if item["status"] == "ok":
-            return Probe(True, item["latency"], "end-to-end HTTP health", time.time())
-    return Probe(False, reason="both health endpoints failed", time=time.time())
+            return Probe(True, item["latency"], "end-to-end HTTP health", time.time(), tuple(attempts))
+    reason = "both health endpoints failed: " + "; ".join(
+        f"{a['site']} http={a['http_code']} curl={a['curl_exit']} {a['detail']}" for a in attempts)
+    return Probe(False, reason=reason, time=time.time(), attempts=tuple(attempts))
 
 
 @contextmanager
@@ -65,7 +86,9 @@ def pinned_probe(exit_candidate, args, relay=None, repeat=1):
         for _ in range(repeat):
             if proc.poll() is not None:
                 return Probe(False, reason="probe Xray failed to start", time=time.time())
-            result = health_at(port, args)
+            network = exit_candidate["outbound"].get("streamSettings", {}).get("network", "UNKNOWN")
+            context = f"pinned:{exit_candidate['tag']}:{network}" + (f":via:{relay['tag']}" if relay else ":direct")
+            result = health_at(port, args, context=context)
             if not result.ok:
                 break
         return result

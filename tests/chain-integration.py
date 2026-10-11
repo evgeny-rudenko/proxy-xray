@@ -37,12 +37,14 @@ class Canary(BaseHTTPRequestHandler):
 
 
 class ChainIntegration(unittest.TestCase):
-    def start_proxy(self, port, block_exit=False):
+    def start_proxy(self, port, block_exit=False, network="tcp"):
         config = {"log": {"loglevel": "none"}, "inbounds": [{
             "listen": "127.0.0.1", "port": port, "protocol": "vless",
             "settings": {"clients": [{"id": UUID}], "decryption": "none"},
-            "streamSettings": {"network": "tcp", "security": "none"}
+            "streamSettings": {"network": network, "security": "none"}
         }], "outbounds": [{"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}}]}
+        if network == "grpc":
+            config["inbounds"][0]["streamSettings"]["grpcSettings"] = {"serviceName": "synthetic-rescue"}
         if block_exit:
             config["outbounds"].append({"tag": "block", "protocol": "blackhole"})
             config["routing"] = {"rules": [{"type": "field", "port": "23001-23002", "outboundTag": "block"}]}
@@ -165,6 +167,49 @@ class ChainIntegration(unittest.TestCase):
         self.assertEqual(0, self.core.api("bo", "-b", BALANCERS[DIRECT], "block").returncode)
         self.assertFalse(health_at(self.core.slot["probe_ports"][DIRECT], self.args).ok)
         self.wait_working(CHAIN)
+
+    def test_direct_transport_override_is_actual_api_selection(self):
+        self.wait_working(DIRECT)
+        self.assertTrue(self.core.override_transport(DIRECT, "exit-direct-proxy-extra-1"))
+        self.assertTrue(self.request())
+        selected, item, ok = self.core.selected(BALANCERS[DIRECT])
+        self.assertTrue(ok)
+        self.assertEqual("exit-direct-proxy-extra-1", selected)
+        self.assertEqual("proxy-extra-1", item["tag"])
+        self.assertTrue(self.core.override_transport(DIRECT))
+        self.assertTrue(self.request())
+
+    def test_failed_direct_transport_is_rescued_by_real_grpc_without_route_switch(self):
+        self.core.stop()
+        terminate_process(self.exit_servers[1])
+        self.exit_servers[1] = self.start_proxy(23002, network="grpc")
+        self.exits[1]["outbound"]["streamSettings"] = {
+            "network": "grpc", "security": "none", "grpcSettings": {"serviceName": "synthetic-rescue"}}
+        self.core = ChainCore(self.args, SLOTS[0], self.exits, self.relays,
+                              {c["uri"] for c in self.exits},
+                              {(e["uri"], r["uri"]) for e in self.exits for r in self.relays})
+        self.core.start()
+        self.wait_working(DIRECT)
+        self.assertTrue(self.core.override_transport(DIRECT, "exit-direct-proxy-extra-0"))
+        terminate_process(self.exit_servers[0])
+        self.assertFalse(self.request())
+        supervisor = Supervisor(self.args)
+        supervisor.core = self.core
+        supervisor.inventory = RouteInventory(self.args, self.exits + self.relays)
+        supervisor.inventory.verified_relays = {c["uri"] for c in self.relays}
+        supervisor.policy.commit(DIRECT, "test")
+        supervisor.save = Mock()
+        with patch("proxy_xray.supervisor.set_dns_proxy_ready"):
+            supervisor.check_routes()
+            self.assertEqual(DIRECT, supervisor.policy.mode)
+            supervisor.check_routes()
+        self.assertEqual(DIRECT, supervisor.policy.mode)
+        self.assertEqual(0, supervisor.policy.failures)
+        self.assertEqual("exit-direct-proxy-extra-1", self.core.transport_overrides[DIRECT])
+        self.assertTrue(self.request())
+        self.assertTrue(self.request(self.core.slot["http_port"], http=True))
+        self.assertTrue(pinned_probe(self.node("extra", 8, self.core.slot["vless_port"]), self.args).ok)
+        self.assertTrue(self.request(self.core.slot["dns_port"]))
 
     def test_exit_failure_subscription_remains_working(self):
         for proc in self.exit_servers:
