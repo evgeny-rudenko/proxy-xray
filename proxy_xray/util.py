@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 
 
 def qfirst(query, *names, default=""):
@@ -34,18 +35,21 @@ def save_json_file(path, data):
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, separators=(",", ":"))
+    fd, tmp = tempfile.mkstemp(prefix=".atomic-", dir=directory or ".")
     try:
-        os.replace(tmp, path)
-    except OSError:
-        with open(path, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(data, handle, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        directory_fd = os.open(directory or ".", os.O_RDONLY)
         try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if os.path.exists(tmp):
             os.unlink(tmp)
-        except OSError:
-            pass
 
 
 def shallow_merge(base, overlay):

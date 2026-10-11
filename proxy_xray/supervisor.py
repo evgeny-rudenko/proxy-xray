@@ -1,604 +1,364 @@
+"""Amsterdam route supervisor. Network probes execute sequentially."""
+from collections import deque
+import random
 import signal
+import socket
+import subprocess
+import sys
 import time
 
-from .assets import prepare_assets, refresh_assets, set_asset_status
-from .candidate_checker import candidate_check_enabled, random_check_delay, run_random_candidate_check
-from .dns_runtime import dns_transport_snapshot, set_dns_proxy_ready, write_bootstrap_domains
-from .failover import evaluate_cooldown, evaluate_failover, failover_state
-from .failover_executor import execute_failover
+from .assets import prepare_assets, refresh_assets
+from .chain_config import DNS_PROXY_PORT, SLOTS
+from .chain_config import make_chain_config
+from .chain_process import ChainCore
+from .dns_runtime import set_dns_proxy_ready, write_bootstrap_domains
 from .health import build_health_checks
-from .manual_extra import (
-    activate_extra_slot,
-    fresh_extra_staging_slot,
-    manual_extra_order,
-    stage_verified_extra_pool,
-    verify_extra_candidates,
-)
-from .pool import select_active_pool
-from .scheduler import due_times, initial_schedule, loop_sleep_seconds
+from .route_inventory import RouteInventory
+from .route_probe import health_at
+from .route_control import apply_route_policy, queue_recheck
+from .route_status import publish
+from .routes import DIRECT, CHAIN, SUBSCRIPTION, UNAVAILABLE, RoutePolicy, normalize_route_policy
 from .state import load_state, persist_state
-from .slot_execution import rebuild_standby, start_active_with_preflight
-from .slot_manager import (
-    SLOTS,
-    check_slot,
-    fresh_slot,
-    record_xray_selected_candidate,
-    refresh_slot_candidate_refs,
-    slot_alive,
-    slot_candidate_tags,
-    slot_candidates,
-    slot_public_status,
-    start_slot,
-    stop_slot,
-    xray_api_status_for_slot,
-)
-from .status import log, mark_control_command, pop_control_commands, set_status, status_candidate_fields, status_snapshot
-from .status_publisher import set_runtime_status
-from .subscription import load_candidates
-from .tcp_switch import set_switch_targets, start_switches, stop_switches
-from .util import load_json_file
-from .vless import (
-    clear_expired_quarantine,
-    native_candidate_order,
-    quarantine_candidate,
-)
-from .xray_process import curl_check, throughput_check
+from .status import log, mark_control_command, pop_control_commands, set_status, status_snapshot
+from .subscription import load_candidates, load_extra_candidates
+from .telegram import send_telegram_notification
+from .tcp_switch import TcpSwitch, set_switch_targets, start_switches, stop_switches
+from .xray_process import terminate_process, throughput_check
+from .xray_config import config_fingerprint
+
+
+class Supervisor:
+    def __init__(self, args):
+        self.args = args
+        self.policy = RoutePolicy(interval=args.check_interval, max_failures=args.max_failures,
+                                  return_successes=args.return_successes, hold=args.return_hold,
+                                  direct_return_stable=args.direct_return_stable,
+                                  direct_retry_delay=args.direct_retry_delay, direct_retry_max=args.direct_retry_max,
+                                  direct_failure_window=args.direct_failure_window)
+        self.core = None
+        self.switches = {}
+        self.jobs = deque()
+        self.stopping = False
+        self.backoff = 1
+        self.next_restart = 0
+        self.dead_seen = False
+        self.core_started = 0
+        self.next_candidate = 0
+        self.control = None
+        self.notifications = deque(maxlen=5)
+
+    def stop(self, *_):
+        self.stopping = True
+
+    def save(self):
+        persist_state(self.args, self.inventory.candidates,
+                      route_history=self.inventory.history, route_mode=self.policy.mode,
+                      route_policy=self.policy.route_policy)
+
+    def set_mode(self, mode, reason):
+        if not self.policy.allows(mode):
+            log("[chain] forbidden route override rejected")
+            return False
+        if not self.core or not self.core.override(mode):
+            log("[chain] route override failed; no transition committed")
+            return False
+        previous = self.policy.mode
+        self.policy.commit(mode, reason)
+        set_dns_proxy_ready(self.args, mode != UNAVAILABLE)
+        set_status(last_switch={"time": time.time(), "from": previous, "to": mode, "reason": reason})
+        log(f"[chain] route {previous} -> {mode}: {reason}")
+        if previous == DIRECT and mode != DIRECT and self.policy.direct_retry_at > time.monotonic():
+            log(f"[chain] direct return delayed {self.policy.direct_recovery()['retry_remaining']}s after rapid failure")
+        if previous != UNAVAILABLE and self.args.telegram_bot_token:
+            self.notifications.append(f"proxy-xray route: {previous} -> {mode}\n{reason}")
+        self.save()
+        return True
+
+    def rebuild(self):
+        old = self.core
+        known = {c["uri"] for c in self.inventory.candidates}
+        retired = bool(old and any(c["uri"] not in known for c in old.mapping.values()))
+        if old and old.alive():
+            planned, mapping = make_chain_config(self.inventory.exits, self.inventory.pool(), self.args,
+                                                 old.slot, self.inventory.direct, self.inventory.pairs)
+            if config_fingerprint(planned) == config_fingerprint(old.config):
+                old.mapping = mapping
+                return True
+        slot = SLOTS[1] if old and old.slot["api_port"] == SLOTS[0]["api_port"] else SLOTS[0]
+        staged = ChainCore(self.args, slot, self.inventory.exits, self.inventory.pool(),
+                           self.inventory.direct, self.inventory.pairs)
+        try:
+            staged.start()
+            desired = self.policy.mode if self.policy.allows(self.policy.mode) else UNAVAILABLE
+            if desired != UNAVAILABLE:
+                result = health_at(slot["probe_ports"][desired], self.args)
+                if not result.ok:
+                    if old and old.alive() and not retired:
+                        log("[chain] staged configuration failed preflight; keeping old core")
+                        staged.stop()
+                        return False
+                    desired = UNAVAILABLE
+                    for mode in self.policy.priority:
+                        result = health_at(slot["probe_ports"][mode], self.args)
+                        if result.ok:
+                            desired = mode
+                            break
+            if not staged.override(desired):
+                raise RuntimeError("staged route override failed")
+            if not self.switches:
+                self.switches = start_switches(slot, self.args)
+                dns = TcpSwitch("Global DNS", "127.0.0.1", DNS_PROXY_PORT, target_port=slot["dns_port"])
+                dns.start()
+                self.switches["dns"] = dns
+            else:
+                set_switch_targets(self.switches, slot)
+                self.switches["dns"].set_target("127.0.0.1", slot["dns_port"])
+            self.core = staged
+            self.core_started = time.monotonic()
+            if old:
+                old.stop()
+            if desired != self.policy.mode:
+                self.set_mode(desired, "core restarted; route reverified")
+            else:
+                set_dns_proxy_ready(self.args, desired != UNAVAILABLE)
+            log("[chain] staged configuration activated; one working core")
+            return True
+        except Exception as exc:
+            staged.stop()
+            log(f"[chain] core preparation failed ({type(exc).__name__})")
+            return False
+
+    def check_routes(self):
+        current = self.policy.mode
+        priority = self.policy.priority
+        modes = [current] if current != UNAVAILABLE else []
+        modes.extend(m for m in priority if m not in modes and (
+            current == UNAVAILABLE or current not in priority or priority.index(m) < priority.index(current)))
+        if self.policy.failures >= self.args.max_failures - 1:
+            modes.extend(m for m in priority if m not in modes)
+        modes = [mode for mode in modes if self.policy.allows(mode)]
+        for mode in modes:
+            if mode in (CHAIN, SUBSCRIPTION) and not self.inventory.pool():
+                continue
+            result = health_at(self.core.slot["probe_ports"][mode], self.args)
+            self.policy.observe(mode, result.ok, result.latency)
+            if mode == current:
+                set_status(last_health={"time": result.time, "status": "ok" if result.ok else "fail",
+                                        "latency": result.latency})
+        desired = self.policy.choose()
+        if desired != self.policy.mode:
+            failed = self.policy.failures >= self.args.max_failures
+            reason = ("Amsterdam route failed; subscription exit verified" if desired == SUBSCRIPTION
+                      else f"{current} failed; verified alternate route" if failed and desired != UNAVAILABLE
+                      else "preferred route verified" if desired != UNAVAILABLE
+                      else "no working foreign route; RU remains direct")
+            self.set_mode(desired, reason)
+            if desired in (SUBSCRIPTION, UNAVAILABLE):
+                self.queue_matrix()
+
+    def queue_matrix(self):
+        requested = self.inventory.diagnostic_pairs()
+        if self.policy.allows(DIRECT):
+            requested += [(DIRECT, c, None) for c in self.inventory.exits[:2]]
+        keys = {(mode, c["uri"], relay["uri"] if relay else None) for mode, c, relay in self.jobs}
+        for job in requested:
+            mode, candidate, relay = job
+            key = (mode, candidate["uri"], relay["uri"] if relay else None)
+            if key not in keys:
+                self.jobs.append(job)
+                keys.add(key)
+
+    def run_probe_job(self):
+        mode, candidate, relay = self.jobs.popleft()
+        if not self.policy.allows(mode):
+            return
+        previous_pool = [c["uri"] for c in self.inventory.pool()]
+        previous_direct = set(self.inventory.direct)
+        previous_pairs = set(self.inventory.pairs)
+        result = self.inventory.probe(mode, candidate, relay)
+        if result.ok and mode != self.policy.mode:
+            self.policy.observe(mode, True, result.latency, recovery=False)
+        changed = (previous_pool != [c["uri"] for c in self.inventory.pool()]
+                   or previous_direct != self.inventory.direct
+                   or previous_pairs != self.inventory.pairs)
+        if changed:
+            self.rebuild()
+        if self.policy.mode == UNAVAILABLE:
+            desired = self.policy.choose()
+            if desired != UNAVAILABLE:
+                actual = health_at(self.core.slot["probe_ports"][desired], self.args)
+                if actual.ok:
+                    self.policy.observe(desired, True, actual.latency)
+                    self.set_mode(desired, "startup route verified end to end")
+        if mode == SUBSCRIPTION and result.ok:
+            pool_uris = {c["uri"] for c in self.inventory.pool()}
+            if self.policy.mode != DIRECT or not any(r in pool_uris for _, r in self.inventory.pairs):
+                self.queue_matrix()
+        self.save()
+
+    def controls(self):
+        for command in pop_control_commands():
+            if command["name"] == "route_policy":
+                apply_route_policy(self, command)
+                continue
+            if command["name"] != "recheck_route":
+                mark_control_command(command, "failed", "unsupported command")
+                continue
+            if self.control:
+                mark_control_command(command, "coalesced", "route recheck already running")
+                continue
+            self.control = command
+            mark_control_command(command, "running", "sequential route recheck")
+            queue_recheck(self)
+
+    def refresh(self):
+        try:
+            candidates = load_candidates(self.args, self.inventory.candidates, load_state(self.args.state_file),
+                                         allow_proxy=self.policy.mode != UNAVAILABLE)
+            self.inventory.update(candidates)
+            known = {c["uri"] for c in candidates}
+            self.jobs = deque(job for job in self.jobs if job[1]["uri"] in known
+                              and (job[2] is None or job[2]["uri"] in known))
+            write_bootstrap_domains(self.args, candidates)
+            for c in self.inventory.exits + self.inventory.pool():
+                self.inventory.resolver.resolve(c)
+            self.rebuild()
+            set_status(last_refresh_at=time.time())
+            self.save()
+        except Exception as exc:
+            log(f"[chain] subscription refresh unavailable ({type(exc).__name__}); retaining current route")
+
+    def run(self):
+        args = self.args
+        signal.signal(signal.SIGTERM, self.stop)
+        signal.signal(signal.SIGINT, self.stop)
+        set_dns_proxy_ready(args, False)
+        prepare_assets(args)
+        if args.asset_refresh_on_start:
+            refresh_assets(args, "startup")
+        write_bootstrap_domains(args, load_extra_candidates(args))
+        dns = subprocess.Popen([sys.executable, "/dns-split-proxy.py", "--dns-global", args.dns_global,
+                                "--dns-ru", args.dns_ru, "--global-route", "socks",
+                                "--proxy-socks-port", str(DNS_PROXY_PORT), "--no-global-direct-fallback",
+                                "--bootstrap-file", args.dns_bootstrap_file, "--status-file", args.dns_status_file,
+                                "--proxy-ready-file", args.dns_proxy_ready_file])
+        try:
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    with socket.create_connection(("127.0.0.1", 53), timeout=0.2):
+                        break
+                except OSError:
+                    if dns.poll() is not None or time.monotonic() >= deadline:
+                        raise RuntimeError("split DNS did not become ready")
+                    time.sleep(0.1)
+            with open("/etc/resolv.conf", "w", encoding="ascii") as handle:
+                handle.write("nameserver 127.0.0.1\noptions timeout:2 attempts:1\n")
+            state = load_state(args.state_file)
+            self.policy.route_policy = normalize_route_policy(state.get("route_policy"))
+            set_status(route_policy=self.policy.route_policy)
+            candidates = load_candidates(args, state=state, allow_proxy=False)
+            self.inventory = RouteInventory(args, candidates, state.get("route_history"))
+            if not self.inventory.exits:
+                raise RuntimeError("vless-extra.txt must contain Amsterdam exit transports")
+            write_bootstrap_domains(args, candidates)
+            if not self.rebuild():
+                raise RuntimeError("initial core could not start")
+            self.jobs.extend(job for job in self.inventory.startup_jobs() if self.policy.allows(job[0]))
+            now = time.monotonic()
+            next_health = next_status = now
+            next_quality, next_speed = now + 60, now + 30
+            next_refresh = now + (args.refresh_interval if (status_snapshot().get("last_subscription_status") or {}).get("status") == "ok"
+                                  else args.sub_post_start_refresh_delay)
+            next_assets = now + args.asset_refresh_interval
+            self.next_candidate = now + random.uniform(args.candidate_check_min_interval, args.candidate_check_max_interval)
+            while not self.stopping:
+                now = time.monotonic()
+                self.controls()
+                if not self.core.alive():
+                    set_dns_proxy_ready(args, False)
+                    if not self.dead_seen:
+                        self.dead_seen = True
+                        self.next_restart = now + self.backoff
+                        log(f"[chain] Xray stopped; restarting in {self.backoff}s")
+                        self.backoff = min(30, self.backoff * 2)
+                        publish(args, self.inventory, self.policy, self.core, None)
+                    if now >= self.next_restart:
+                        if self.rebuild():
+                            self.dead_seen = False
+                            next_health = 0
+                        else:
+                            self.next_restart = time.monotonic() + self.backoff
+                            self.backoff = min(30, self.backoff * 2)
+                    time.sleep(0.2)
+                    continue
+                if now - self.core_started >= 60:
+                    self.backoff = 1
+                if dns.poll() is not None:
+                    raise RuntimeError("split DNS process stopped")
+                if now >= next_health:
+                    self.check_routes()
+                    next_health = time.monotonic() + args.check_interval
+                    set_status(next_route_check_at=time.time() + args.check_interval)
+                    snapshot = status_snapshot()
+                    checks = build_health_checks(args, self.core.alive(), snapshot.get("last_health"),
+                                                 snapshot.get("last_quality"), snapshot.get("last_throughput"),
+                                                 snapshot.get("last_subscription_status"))
+                    for key in ("quality_download", "throughput"):
+                        if checks[key]["status"] == "fail":
+                            checks[key]["status"] = "warn"
+                    set_status(health_checks=checks, last_health_checks_at=time.time())
+                if now >= next_refresh:
+                    self.refresh()
+                    next_refresh = time.monotonic() + args.refresh_interval
+                if now >= self.next_candidate and not self.jobs:
+                    candidates = self.inventory.relays if (not self.policy.allows(DIRECT) or random.random() < 0.6) and self.inventory.relays else self.inventory.exits
+                    if candidates:
+                        candidate = random.choice(candidates)
+                        mode = SUBSCRIPTION if candidate["source"] == "subscription" else DIRECT
+                        if self.policy.allows(mode):
+                            self.jobs.append((mode, candidate, None))
+                    if self.policy.mode != DIRECT:
+                        self.queue_matrix()
+                    self.next_candidate = time.monotonic() + random.uniform(args.candidate_check_min_interval, args.candidate_check_max_interval)
+                if self.jobs:
+                    self.run_probe_job()
+                if self.control and not self.jobs:
+                    mark_control_command(self.control, "done", "recheck complete; selected policy applied")
+                    self.control = None
+                    next_health = 0
+                if self.notifications and not self.jobs:
+                    send_telegram_notification(args, self.notifications.popleft())
+                if self.policy.mode != UNAVAILABLE:
+                    for kind, due, url, timeout, minimum in (
+                        ("quality", next_quality, args.quality_url, args.quality_max_time, args.quality_min_kbps),
+                        ("throughput", next_speed, args.throughput_url, args.throughput_max_time, args.throughput_min_kbps),
+                    ):
+                        interval = args.quality_check_interval if kind == "quality" else args.throughput_check_interval
+                        if interval > 0 and now >= due:
+                            ok, kbps = throughput_check(1080, url, timeout)
+                            set_status(**{"last_" + kind: {"time": time.time(), "status": "ok" if ok and kbps >= minimum else "warn",
+                                                           "kbps": round(kbps) if ok else None}})
+                            if kind == "quality":
+                                next_quality = time.monotonic() + interval
+                            else:
+                                next_speed = time.monotonic() + interval
+                if args.asset_refresh_interval > 0 and now >= next_assets:
+                    if refresh_assets(args):
+                        self.rebuild()
+                    next_assets = time.monotonic() + args.asset_refresh_interval
+                if now >= next_status:
+                    publish(args, self.inventory, self.policy, self.core,
+                            time.time() + max(0, self.next_candidate - time.monotonic()))
+                    next_status = time.monotonic() + args.active_path_interval
+                time.sleep(0.1)
+        finally:
+            set_dns_proxy_ready(args, False)
+            stop_switches(self.switches)
+            if self.core:
+                self.core.stop()
+            terminate_process(dns)
 
 
 def run(args):
-    set_dns_proxy_ready(args, False)
-    set_status(dns_transport=dns_transport_snapshot(args))
-    prepare_assets(args)
-    if args.asset_refresh_on_start:
-        refresh_assets(args, reason="startup")
-
-    rules = load_json_file(args.rules_file, {"rules": []})
-    inject = load_json_file(args.inject_file, {})
-    state = load_state(args.state_file)
-    if state.get("subscription_usage"):
-        set_status(subscription_usage=state["subscription_usage"])
-    candidates = []
-    while not candidates:
-        candidates = load_candidates(args, state=state, allow_proxy=False)
-        if not candidates:
-            log(f"no usable VLESS candidates after filtering; retrying in {args.retry_interval}s")
-            time.sleep(args.retry_interval)
-    startup_subscription_status = status_snapshot().get("last_subscription_status") or {}
-
-    candidates = native_candidate_order(candidates)
-    bootstrap = write_bootstrap_domains(args, candidates)
-    log(f"DNS bootstrap list updated with {len(bootstrap)} endpoint domains")
-    active_slot = fresh_slot(SLOTS[0])
-    standby_slot = fresh_slot(SLOTS[1])
-    switches = {}
-    stopping = False
-
-    if not start_active_with_preflight(active_slot, candidates, args, rules, inject, "startup"):
-        log("startup; active preflight did not find a healthy pool, exposing best available pool")
-        start_slot(
-            active_slot,
-            select_active_pool(
-                candidates,
-                size=args.active_pool_size,
-                extra_reserve_per_slot=getattr(args, "pool_extra_reserve_per_slot", 0),
-                extra_require_live=getattr(args, "pool_extra_require_live", True),
-                extra_max_age=0,
-                extra_max_per_host=getattr(args, "pool_extra_max_per_host", 1),
-            ),
-            args,
-            rules,
-            inject,
-            active=True,
-        )
-    switches = start_switches(active_slot, args)
-    set_dns_proxy_ready(args, True)
-    rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "startup")
-    persist_state(args, candidates, active=active_slot.get("candidate"))
-    set_status(
-        standby_policy={
-            "max_age": args.standby_max_age,
-            "cooldown": args.failover_cooldown,
-            "quarantine_duration": args.quarantine_duration,
-        },
-    )
-    set_runtime_status(candidates, args, active_slot, standby_slot)
-
-    checks_enabled = candidate_check_enabled(args)
-    schedule = initial_schedule(args, startup_subscription_status, checks_enabled=checks_enabled)
-    now = schedule["now"]
-    next_asset_refresh = schedule["next_asset_refresh"]
-    next_refresh = schedule["next_refresh"]
-    next_health_check = schedule["next_health_check"]
-    next_quality_check = schedule["next_quality_check"]
-    next_throughput_check = schedule["next_throughput_check"]
-    next_diagnostics_check = schedule["next_diagnostics_check"]
-    next_active_path_check = schedule["next_active_path_check"]
-    if schedule["subscription_retry_delay"] is not None:
-        log(
-            "initial subscription refresh did not succeed; "
-            f"retrying through the running proxy in {schedule['subscription_retry_delay']}s"
-        )
-    next_candidate_check = now + random_check_delay(args) if checks_enabled else None
-    if checks_enabled:
-        set_status(
-            candidate_checker={
-                "enabled": True,
-                "min_interval": args.candidate_check_min_interval,
-                "max_interval": args.candidate_check_max_interval,
-                "extra_weight": args.candidate_check_extra_weight,
-            },
-            next_candidate_check_at=time.time() + max(0, next_candidate_check - now),
-        )
-    else:
-        set_status(candidate_checker={"enabled": False, "min_interval": None, "max_interval": None})
-
-    failures = 0
-    slow_checks = 0
-    quality_slow_checks = 0
-    throughput_slow_checks = 0
-    last_health_status = None
-    last_quality_status = None
-    last_throughput_status = None
-    switch_cooldown_until = 0.0
-    manual_extra_mode = False
-    preflight_slot = None
-
-    def staged_extra_preflight(pool, reason):
-        nonlocal preflight_slot
-        verified, removed = verify_extra_candidates(pool, args, reason, cancelled=lambda: stopping)
-        if not verified or stopping:
-            return [], None, 0.0, removed
-        preflight_slot = fresh_extra_staging_slot()
-        staged_pool, latency, quality_kbps = stage_verified_extra_pool(
-            preflight_slot, verified, args, rules, inject, cancelled=lambda: stopping,
-        )
-        if not staged_pool:
-            stop_slot(preflight_slot)
-            preflight_slot = None
-        return staged_pool, latency, quality_kbps, removed
-
-    def activate_staged_extra_pool(staged_pool, latency, quality_kbps, reason, kind, removed=None):
-        nonlocal active_slot, preflight_slot, failures, slow_checks, quality_slow_checks, throughput_slow_checks
-        nonlocal last_health_status, last_quality_status, switch_cooldown_until, manual_extra_mode
-        nonlocal next_health_check, next_quality_check
-        old_active_tag = active_slot["candidate"].get("tag") if active_slot.get("candidate") else None
-        active_slot = activate_extra_slot(active_slot, preflight_slot, switches)
-        preflight_slot = None
-        if not slot_alive(standby_slot):
-            rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, reason)
-        switch_cooldown_until = time.monotonic() + args.failover_cooldown
-        next_health_check = time.monotonic() + args.check_interval
-        if args.quality_check_interval > 0:
-            next_quality_check = time.monotonic() + args.quality_check_interval
-        failures = 0
-        slow_checks = 0
-        quality_slow_checks = 0
-        throughput_slow_checks = 0
-        manual_extra_mode = True
-        last_health_status = {
-            "time": time.time(),
-            "status": "ok",
-            "latency": round(latency, 3) if latency is not None else None,
-        }
-        last_quality_status = {
-            "time": time.time(),
-            "status": "ok",
-            "kbps": round(quality_kbps),
-        }
-        removed = removed or []
-        set_status(
-            last_health=last_health_status,
-            last_quality=last_quality_status,
-            failures=0,
-            slow_checks=0,
-            quality_slow_checks=0,
-            throughput_slow_checks=0,
-            switch_cooldown_until=time.time() + args.failover_cooldown,
-            manual_extra_mode={
-                "active": True,
-                "pool_size": len(staged_pool),
-                "last_removed": removed[-1].get("tag") if removed else None,
-            },
-            last_switch={
-                "time": time.time(),
-                "reason": reason,
-                "kind": kind,
-                "standby_used": False,
-                "standby_mode": "verified-extra-preflight",
-                "from": old_active_tag,
-                "to": active_slot["candidate"].get("tag") if active_slot.get("candidate") else None,
-            },
-            failover_state=failover_state(
-                state="cooldown",
-                cooldown_until=switch_cooldown_until,
-                now_monotonic=time.monotonic(),
-            ),
-        )
-        persist_state(args, candidates, active=active_slot.get("candidate"))
-        set_runtime_status(candidates, args, active_slot, standby_slot)
-
-    def force_extra_active_pool(command):
-        extra_candidates = manual_extra_order(
-            [
-                candidate
-                for candidate in candidates
-                if candidate.get("source") == "extra"
-            ]
-        )
-        if not extra_candidates:
-            log("force extra pool requested; no extra candidates are configured")
-            mark_control_command(command, "failed", "no extra candidates configured")
-            return
-        log(f"force extra pool requested; verifying {len(extra_candidates)} extra candidates; preserving hot standby")
-        staged_pool, latency, quality_kbps, removed = staged_extra_preflight(extra_candidates, "force extra pool")
-        if not staged_pool:
-            log("force extra pool rejected; no extra candidate passed staged preflight")
-            set_runtime_status(candidates, args, active_slot, standby_slot)
-            mark_control_command(command, "failed", "no extra candidate passed staged preflight")
-            return
-        activate_staged_extra_pool(
-            staged_pool,
-            latency,
-            quality_kbps,
-            "manual force extra pool",
-            "manual_extra_pool",
-            removed=removed,
-        )
-        detail = (
-            f"staged extra pool passed health in {latency:.3f}s and quality "
-            f"{quality_kbps:.0f} kbps; active pool switched to {len(staged_pool)} extra candidates"
-        )
-        mark_control_command(command, "done", detail)
-
-    def recover_manual_extra_pool(decision):
-        nonlocal manual_extra_mode
-        log(f"{decision.reason}; rechecking extra transports individually before changing the pool")
-        staged_pool, latency, quality_kbps, removed = staged_extra_preflight(
-            slot_candidates(active_slot), "manual extra recovery",
-        )
-        if not staged_pool:
-            manual_extra_mode = False
-            set_status(manual_extra_mode={"active": False, "pool_size": 0, "last_removed": removed[-1].get("tag") if removed else None})
-            log("manual extra recovery found no healthy extra pool; falling back to normal hot standby")
-            return False
-
-        activate_staged_extra_pool(
-            staged_pool,
-            latency,
-            quality_kbps,
-            "manual extra recovery",
-            "manual_extra_recovery",
-            removed=removed,
-        )
-        log(
-            f"manual extra recovery switched to {len(staged_pool)} verified extra candidates; "
-            f"quality {quality_kbps:.0f} kbps"
-        )
-        return True
-
-    def stop(_signum, _frame):
-        nonlocal stopping
-        stopping = True
-        set_dns_proxy_ready(args, False)
-        stop_switches(switches)
-        stop_slot(active_slot)
-        stop_slot(standby_slot)
-        if preflight_slot:
-            stop_slot(preflight_slot)
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
-
-    while not stopping:
-        next_due_times = due_times(
-            args,
-            next_refresh=next_refresh,
-            next_health_check=next_health_check,
-            next_diagnostics_check=next_diagnostics_check,
-            next_active_path_check=next_active_path_check,
-            next_asset_refresh=next_asset_refresh,
-            next_quality_check=next_quality_check,
-            next_throughput_check=next_throughput_check,
-            next_candidate_check=next_candidate_check,
-        )
-        sleep_for = loop_sleep_seconds(next_due_times)
-        time.sleep(min(sleep_for, 1.0))
-        now = time.monotonic()
-
-        for command in pop_control_commands():
-            if command.get("name") == "force_extra_pool":
-                force_extra_active_pool(command)
-            else:
-                log(f"unknown control command ignored: {command.get('name')}")
-                mark_control_command(command, "ignored", "unknown command")
-
-        now = time.monotonic()
-        if stopping:
-            break
-
-        if now >= next_refresh:
-            try:
-                state = load_state(args.state_file)
-                new_candidates = load_candidates(args, candidates, state=state, allow_proxy=True)
-                next_refresh = time.monotonic() + args.refresh_interval
-                candidates = native_candidate_order(new_candidates)
-                bootstrap = write_bootstrap_domains(args, candidates)
-                log(f"DNS bootstrap list updated with {len(bootstrap)} endpoint domains")
-                refresh_slot_candidate_refs((active_slot, standby_slot), candidates)
-                if not slot_alive(standby_slot) or not slot_candidates(standby_slot):
-                    rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "subscription refresh")
-                persist_state(args, candidates, active=active_slot.get("candidate"))
-                set_status(last_refresh_at=time.time())
-                set_runtime_status(candidates, args, active_slot, standby_slot)
-            except Exception as exc:
-                log(f"subscription refresh failed: {exc}")
-
-        if next_asset_refresh is not None and now >= next_asset_refresh:
-            try:
-                assets_changed = refresh_assets(args, reason="scheduled")
-                next_asset_refresh = time.monotonic() + args.asset_refresh_interval
-                if assets_changed:
-                    log("geo assets changed; rebuilding active and hot standby xray slots")
-                    active_candidates = slot_candidates(active_slot)
-                    standby_candidates = slot_candidates(standby_slot)
-                    if active_candidates:
-                        start_slot(active_slot, active_candidates, args, rules, inject, active=True, preserve_order=manual_extra_mode)
-                        set_switch_targets(switches, active_slot)
-                    if standby_candidates:
-                        start_slot(standby_slot, standby_candidates, args, rules, inject, active=False)
-                    set_runtime_status(candidates, args, active_slot, standby_slot)
-                    continue
-            except Exception as exc:
-                log(f"asset refresh failed: {exc}")
-                set_asset_status(args)
-                next_asset_refresh = time.monotonic() + args.asset_refresh_interval
-
-        if now >= next_health_check:
-            next_health_check = time.monotonic() + args.check_interval
-            if not slot_alive(active_slot):
-                failures = args.max_failures
-                log("active xray slot exited")
-                set_status(xray_running=False)
-            else:
-                ok, latency = curl_check(1080, args.health_url, args.health_timeout)
-                if not ok and manual_extra_mode:
-                    log("manual extra pool health probe failed; retrying before pinned transport checks")
-                    time.sleep(2.0)
-                    ok, latency = curl_check(1080, args.health_url, args.health_timeout)
-                if ok:
-                    failures = 0
-                    active_slot["healthy"] = True
-                    active_slot["failures"] = 0
-                    last_health_status = {"time": time.time(), "status": "ok", "latency": round(latency, 3)}
-                    active_slot["last_health"] = last_health_status
-                    selected = record_xray_selected_candidate(active_slot, args, latency=latency, mark_ok=True)
-                    if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
-                        active_slot["candidate"]["last_ok_at"] = time.time()
-                        active_slot["candidate"]["last_latency"] = latency
-                    set_status(xray_running=True, last_health=last_health_status)
-                    if args.degrade_latency > 0 and latency >= args.degrade_latency:
-                        slow_checks += 1
-                        log(
-                            f"health degraded {slow_checks}/{args.degrade_checks}: "
-                            f"{latency:.3f}s >= {args.degrade_latency:.3f}s"
-                        )
-                    else:
-                        slow_checks = 0
-                else:
-                    failures += 1
-                    active_slot["healthy"] = False
-                    active_slot["failures"] = failures
-                    slow_checks = 0
-                    log(f"health failed {failures}/{args.max_failures}")
-                    if active_slot.get("candidate") and not manual_extra_mode:
-                        active_slot["candidate"]["last_fail_at"] = time.time()
-                    last_health_status = {"time": time.time(), "status": "failed", "latency": None}
-                    active_slot["last_health"] = last_health_status
-                    set_status(xray_running=True, last_health=last_health_status)
-                set_status(failures=failures, slow_checks=slow_checks)
-
-            if slot_candidates(standby_slot):
-                standby_ok, standby_latency = check_slot(standby_slot, args)
-                if standby_ok:
-                    log(
-                        f"hot standby ok "
-                        f"{slot_candidate_tags(standby_slot)} ({standby_latency:.3f}s)"
-                    )
-                elif standby_slot.get("failures", 0) >= args.max_failures:
-                    failed = standby_slot.get("candidate")
-                    if failed:
-                        quarantine_candidate(failed, args.quarantine_duration, "hot standby failed")
-                    rebuild_standby(
-                        standby_slot,
-                        candidates,
-                        slot_candidates(active_slot),
-                        args,
-                        rules,
-                        inject,
-                        "hot standby failed",
-                    )
-                set_status(hot_standby=slot_public_status(standby_slot))
-
-            set_runtime_status(candidates, args, active_slot, standby_slot)
-            persist_state(args, candidates, active=active_slot.get("candidate"))
-
-        if (
-            args.quality_check_interval > 0
-            and next_quality_check is not None
-            and now >= next_quality_check
-            and slot_alive(active_slot)
-        ):
-            ok, quality_kbps = throughput_check(1080, args.quality_url, args.quality_max_time)
-            next_quality_check = time.monotonic() + args.quality_check_interval
-            if ok and quality_kbps >= args.quality_min_kbps:
-                quality_slow_checks = 0
-                log(f"quality download ok: {quality_kbps:.0f} kbps")
-                last_quality_status = {
-                    "time": time.time(),
-                    "status": "ok",
-                    "kbps": round(quality_kbps),
-                }
-                selected = record_xray_selected_candidate(active_slot, args, throughput_kbps=quality_kbps)
-                if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
-                    active_slot["candidate"]["last_throughput_kbps"] = round(quality_kbps)
-                set_status(last_quality=last_quality_status)
-            else:
-                quality_slow_checks += 1
-                log(
-                    f"quality download degraded {quality_slow_checks}/{args.quality_degrade_checks}: "
-                    f"{quality_kbps:.0f} kbps < {args.quality_min_kbps:.0f} kbps"
-                )
-                last_quality_status = {
-                    "time": time.time(),
-                    "status": "degraded",
-                    "kbps": round(quality_kbps),
-                }
-                set_status(last_quality=last_quality_status)
-            set_status(quality_slow_checks=quality_slow_checks)
-            persist_state(args, candidates, active=active_slot.get("candidate"))
-
-        if (
-            args.throughput_check_interval > 0
-            and next_throughput_check is not None
-            and now >= next_throughput_check
-            and slot_alive(active_slot)
-        ):
-            ok, throughput_kbps = throughput_check(1080, args.throughput_url, args.throughput_max_time)
-            next_throughput_check = time.monotonic() + args.throughput_check_interval
-            if ok and throughput_kbps >= args.throughput_min_kbps:
-                throughput_slow_checks = 0
-                log(f"throughput ok: {throughput_kbps:.0f} kbps")
-                last_throughput_status = {
-                    "time": time.time(),
-                    "status": "ok",
-                    "kbps": round(throughput_kbps),
-                }
-                selected = record_xray_selected_candidate(active_slot, args, throughput_kbps=throughput_kbps)
-                if active_slot.get("candidate") and (not selected or selected is active_slot.get("candidate")):
-                    active_slot["candidate"]["last_throughput_kbps"] = round(throughput_kbps)
-                set_status(last_throughput=last_throughput_status)
-            else:
-                throughput_slow_checks += 1
-                log(
-                    f"throughput degraded {throughput_slow_checks}/{args.throughput_degrade_checks}: "
-                    f"{throughput_kbps:.0f} kbps < {args.throughput_min_kbps:.0f} kbps"
-                )
-                last_throughput_status = {
-                    "time": time.time(),
-                    "status": "degraded",
-                    "kbps": round(throughput_kbps),
-                }
-                set_status(last_throughput=last_throughput_status)
-            set_status(throughput_slow_checks=throughput_slow_checks)
-
-        if now >= next_diagnostics_check:
-            snapshot = status_snapshot()
-            health_checks = build_health_checks(
-                args,
-                slot_alive(active_slot),
-                last_health_status or snapshot.get("last_health"),
-                last_quality_status or snapshot.get("last_quality"),
-                last_throughput_status or snapshot.get("last_throughput"),
-                snapshot.get("last_subscription_status"),
-            )
-            set_status(
-                health_checks=health_checks,
-                dns_transport=dns_transport_snapshot(args),
-                last_health_checks_at=time.time(),
-            )
-            next_diagnostics_check = time.monotonic() + args.check_interval
-
-        if args.active_path_interval > 0 and now >= next_active_path_check:
-            active_api = xray_api_status_for_slot(active_slot, args)
-            standby_api = xray_api_status_for_slot(standby_slot, args)
-            set_status(
-                active_path=active_api,
-                active_observatory=active_api,
-                standby_observatory=standby_api,
-            )
-            next_active_path_check = time.monotonic() + args.active_path_interval
-
-        standby_ready_for_fast_failover = slot_alive(standby_slot) and standby_slot.get("healthy")
-        decision = evaluate_failover(
-            args,
-            failures=failures,
-            slow_checks=slow_checks,
-            quality_slow_checks=quality_slow_checks,
-            throughput_slow_checks=throughput_slow_checks,
-            standby_ready=standby_ready_for_fast_failover,
-            allow_fast_failover=not manual_extra_mode,
-        )
-        next_failover_state = "triggered" if decision.triggered else "idle"
-        if not decision.triggered and switch_cooldown_until and now < switch_cooldown_until:
-            next_failover_state = "cooldown"
-        set_status(
-            failover_state=failover_state(
-                decision,
-                state=next_failover_state,
-                cooldown_until=switch_cooldown_until,
-                now_monotonic=now,
-                failures=failures,
-                slow_checks=slow_checks,
-                quality_slow_checks=quality_slow_checks,
-                throughput_slow_checks=throughput_slow_checks,
-            )
-        )
-
-        if decision.triggered:
-            if manual_extra_mode and evaluate_cooldown(decision, switch_cooldown_until).suppressed:
-                slow_checks = quality_slow_checks = throughput_slow_checks = 0
-                set_status(slow_checks=0, quality_slow_checks=0, throughput_slow_checks=0)
-                log(f"{decision.reason}; manual extra recovery deferred by cooldown")
-                continue
-            if manual_extra_mode and recover_manual_extra_pool(decision):
-                continue
-            if stopping:
-                break
-            result = execute_failover(
-                args=args,
-                decision=decision,
-                now=now,
-                switch_cooldown_until=switch_cooldown_until,
-                failures=failures,
-                slow_checks=slow_checks,
-                quality_slow_checks=quality_slow_checks,
-                throughput_slow_checks=throughput_slow_checks,
-                active_slot=active_slot,
-                standby_slot=standby_slot,
-                switches=switches,
-                candidates=candidates,
-                rules=rules,
-                inject=inject,
-                last_health_status=last_health_status,
-                last_throughput_status=last_throughput_status,
-            )
-            active_slot = result.active_slot
-            standby_slot = result.standby_slot
-            candidates = result.candidates
-            switch_cooldown_until = result.switch_cooldown_until
-            last_health_status = result.last_health_status
-            last_throughput_status = result.last_throughput_status
-            failures = result.failures
-            slow_checks = result.slow_checks
-            quality_slow_checks = result.quality_slow_checks
-            throughput_slow_checks = result.throughput_slow_checks
-            manual_extra_mode = False
-            set_status(manual_extra_mode={"active": False, "pool_size": 0, "last_removed": None})
-            if result.skip_remaining_loop:
-                continue
-
-        if next_candidate_check is not None and time.monotonic() >= next_candidate_check:
-            run_random_candidate_check(candidates, args)
-            persist_state(args, candidates, active=active_slot.get("candidate"))
-            candidates = native_candidate_order(candidates)
-            refresh_slot_candidate_refs((active_slot, standby_slot), candidates)
-            if not slot_alive(standby_slot) or standby_slot.get("failures", 0) >= args.max_failures:
-                rebuild_standby(standby_slot, candidates, slot_candidates(active_slot), args, rules, inject, "candidate check")
-            delay = random_check_delay(args)
-            next_candidate_check = time.monotonic() + delay
-            set_status(
-                **status_candidate_fields(candidates, args.standby_max_age),
-                active_backend=slot_public_status(active_slot),
-                hot_standby=slot_public_status(standby_slot),
-                next_candidate_check_at=time.time() + delay,
-            )
+    Supervisor(args).run()

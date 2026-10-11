@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from proxy_xray.state import load_state, persist_state
@@ -28,6 +29,18 @@ def candidate(uri="vless://candidate", last_ok_at=None, last_fail_at=None, laten
 
 
 class StateTest(unittest.TestCase):
+    def test_route_history_and_candidates_share_one_atomic_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(state_file=os.path.join(directory, "state.json"))
+            history = {"pair": {"checks": [{"ok": True}]}}
+            with patch("proxy_xray.state.save_json_file") as save:
+                persist_state(args, [candidate()], route_history=history, route_mode="chained_amsterdam")
+            save.assert_called_once()
+            payload = save.call_args.args[1]
+            self.assertEqual(history, payload["route_history"])
+            self.assertEqual("chained_amsterdam", payload["route_mode"])
+            self.assertIn("vless://candidate", payload["candidates"])
+
     def test_corrupt_state_is_moved_aside_and_empty_state_is_returned(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")

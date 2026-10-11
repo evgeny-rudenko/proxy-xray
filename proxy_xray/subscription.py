@@ -138,8 +138,8 @@ def fetch_subscription(args, allow_proxy=False):
             raw, headers = fetcher()
             return raw, method, headers
         except Exception as exc:
-            errors.append(f"{method}: {exc}")
-            log(f"subscription {method} fetch failed: {exc}")
+            errors.append(f"{method}: {type(exc).__name__}")
+            log(f"subscription {method} fetch failed ({type(exc).__name__})")
     raise RuntimeError("; ".join(errors) or "no subscription fetch method is enabled")
 
 
@@ -250,7 +250,7 @@ def load_candidates(args, old_candidates=None, state=None, allow_proxy=False):
             )
     prefer = [item.lower() for item in csv(args.prefer)]
     excludes = [item.lower() for item in csv(args.exclude)]
-    candidates = filter_and_rank(extra + parsed, prefer, excludes)
+    candidates = extra + filter_and_rank(parsed, prefer, excludes)
     if state:
         candidates = apply_persisted_state(candidates, state)
         last_selected_uri = state.get("last_selected_uri")

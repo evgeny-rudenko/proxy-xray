@@ -1,9 +1,5 @@
 import json
 
-from .util import shallow_merge
-from .vless import assign_candidate_tags
-
-
 XRAY_API_PORT = 10085
 
 
@@ -79,77 +75,6 @@ def make_inbounds(
             }
         )
     return inbounds
-
-
-def rules_for_native_balancer(rules, balancer_tag):
-    converted = [{"type": "field", "inboundTag": ["api"], "outboundTag": "api"}]
-    for rule in rules.get("rules", []):
-        next_rule = dict(rule)
-        if next_rule.get("outboundTag") == "proxy":
-            next_rule.pop("outboundTag", None)
-            next_rule["balancerTag"] = balancer_tag
-        converted.append(next_rule)
-    converted.append({"type": "field", "network": "tcp,udp", "balancerTag": balancer_tag})
-    return converted
-
-
-def make_native_balancer_config(
-    candidates,
-    dns,
-    rules,
-    inject,
-    args,
-    socks_port=1080,
-    http_port=8123,
-    dns_port=5353,
-    api_port=XRAY_API_PORT,
-    inbound_vless_port=None,
-):
-    assign_candidate_tags(candidates)
-    proxy_outbounds = [candidate["outbound"] for candidate in candidates]
-    fallback = candidates[0]["tag"]
-    balancer_tag = "auto"
-    config = {
-        "log": {"loglevel": "warning"},
-        "api": {
-            "tag": "api",
-            "services": ["RoutingService"],
-        },
-        "observatory": {
-            "subjectSelector": ["proxy-extra-", "proxy-sub-"],
-            "probeUrl": args.health_url,
-            "probeInterval": args.observatory_probe_interval,
-            "enableConcurrency": False,
-        },
-        "outbounds": proxy_outbounds
-        + [
-            {"tag": "direct", "protocol": "freedom"},
-            {"tag": "block", "protocol": "blackhole"},
-            {"tag": "blocked", "protocol": "blackhole"},
-        ],
-        "inbounds": make_inbounds(
-            dns,
-            args,
-            socks_port=socks_port,
-            http_port=http_port,
-            dns_port=dns_port,
-            api_port=api_port,
-            inbound_vless_port=inbound_vless_port,
-        ),
-        "routing": {
-            "domainStrategy": "AsIs",
-            "rules": rules_for_native_balancer(rules, balancer_tag),
-            "balancers": [
-                {
-                    "tag": balancer_tag,
-                    "selector": ["proxy-extra-", "proxy-sub-"],
-                    "fallbackTag": fallback,
-                    "strategy": {"type": args.balancer_strategy},
-                }
-            ],
-        },
-    }
-    return shallow_merge(config, inject)
 
 
 def config_fingerprint(config):

@@ -1,5 +1,9 @@
 # Proxy Xray Project Changes
 
+## Amsterdam Routing Policy Switch
+
+The experimental Amsterdam branch now supports persistent operator policies: `auto` (Direct → Chain → Subscription) and `subscription_only` (Chain → Subscription, never Direct). The dashboard applies changes through a validated same-origin JSON POST and the sequential supervisor queue without a core restart. Startup, staged recovery, manual rechecks and candidate checks respect the same allowed-route policy. Failed persistence leaves the choice unchanged; a failed blocking override stops the core rather than serving a forbidden path. RU routing remains direct and global DNS follows the permitted route with no direct fallback. Both README versions document policy persistence, emergency egress and existing TCP-session limitations.
+
 This file summarizes the major changes made to turn the original proxy-xray image into a home LAN proxy gateway with subscription failover, status UI, split DNS, and smoke tests.
 
 ## Current Goal
@@ -385,3 +389,16 @@ This avoids exposing the home server to the public internet and avoids GitHub Ac
 - Non-RU DNS-over-TCP can now traverse the active VLESS pool through either the public SOCKS switch or HTTP CONNECT proxy.
 - RU DNS remains direct, while subscription and VLESS endpoint domains use an automatically refreshed direct bootstrap list to prevent DNS startup loops.
 - Added positive/stale DNS cache, disabled silent direct fallback for ordinary global queries, runtime status reporting, dashboard visibility, tests, and operator documentation.
+
+## Amsterdam Chain Experiment (codex/amsterdam-chain)
+
+- Added five-minute continuous balanced-route verification before voluntary direct-Amsterdam return. Rapid direct failures defer the next return for 600 seconds, then 900 seconds; working-route failure bypasses the guard. Pinned candidate proofs cannot build recovery stability. Status/UI expose the countdown and accumulated stable time, and logs distinguish route failure from preferred-route recovery. The original Amsterdam chain priority and public ports remain unchanged.
+
+- Replaced mixed active/hot pools with one working Xray core and separate direct-Amsterdam, chained-Amsterdam and subscription-relay balancers. All extra transports remain available; only three individually verified subscription relays enter the pool.
+- The route order is direct Amsterdam, subscription-to-Amsterdam, subscription emergency exit, then a foreign-traffic blackhole. RU traffic remains direct. Mode changes use the Routing API; configuration replacements are staged and verified before activation.
+- Added sequential standalone/pinned-pair probes, two-cycle failover, spaced three-success recovery with a 180-second guard, two independent health URLs and bounded core restart backoff. Pair failures do not penalize relays; endpoint DNS failures are not scored as node failures.
+- Foreign DNS uses a dedicated internal SOCKS entry forced through the selected route, including during startup. Missing readiness never enables a direct fallback. Endpoint bootstrap resolution remains separate and preserves TLS SNI.
+- Replaced Extra Pool with a coalesced route-recheck queue. The dashboard shows exit and delivery path, native API selections or UNKNOWN, emergency-exit warnings, return progress, separate pools, existing quota/QR/diagnostics and incremental refresh.
+- Split the supervisor/configuration/probes/status/views into independent modules. Private atomic state now lives under runtime/chain; old operator files and assets are preserved. Removed the abandoned local extra container only.
+- Validation: unit tests, actual-Xray isolated failure tests, local HTTP/SOCKS/LAN VLESS, and equal direct/chained IPv4 exits through two verified relays. Several-hour observation remains pending. No home-server deployment, main changes, GitHub push or commit was performed for this experiment.
+- A later live check exposed a relay with working Internet but failed Amsterdam delivery. Added per-exit relay eligibility based on independently verified pairs, reusing the same subscription outbounds, and API reporting of the exit-specific relay selection. Incompatible relays remain eligible for emergency Internet egress, not for that chain. Added a matching isolated regression scenario.

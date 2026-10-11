@@ -5,6 +5,7 @@ import time
 from .status import log, status_snapshot
 from .util import save_json_file
 from .vless import parse_vless_uri
+from .routes import normalize_route_policy
 
 
 SCHEMA_VERSION = 3
@@ -17,6 +18,7 @@ def empty_state():
         "candidates": {},
         "last_selected_uri": None,
         "subscription_usage": None,
+        "route_policy": "auto",
     }
 
 
@@ -143,6 +145,7 @@ def normalize_state(state):
     }
     normalized.setdefault("last_selected_uri", None)
     normalized["subscription_usage"] = normalize_subscription_usage(state.get("subscription_usage"))
+    normalized["route_policy"] = normalize_route_policy(state.get("route_policy"))
     return normalized
 
 
@@ -164,7 +167,7 @@ def load_state(path):
             return normalize_state(json.load(handle))
     except FileNotFoundError:
         return empty_state()
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         backup_corrupt_state(path, exc)
         return empty_state()
     except OSError as exc:
@@ -272,7 +275,15 @@ def candidate_record(candidate, previous=None, now=None):
     return append_latest_candidate_check(record, candidate, now=now)
 
 
-def persist_state(args, candidates, active=None):
+def persist_route_policy(args, policy):
+    if not args.state_file:
+        raise ValueError("state file is required to save routing policy")
+    state = load_state(args.state_file)
+    state["route_policy"] = normalize_route_policy(policy)
+    save_json_file(args.state_file, state)
+
+
+def persist_state(args, candidates, active=None, *, route_history=None, route_mode=None, route_policy=None):
     if not args.state_file:
         return
     previous_state = load_state(args.state_file)
@@ -295,6 +306,9 @@ def persist_state(args, candidates, active=None):
         "last_balancer_fallback_uri": candidates[0]["uri"] if candidates else None,
         "subscription_usage": normalize_subscription_usage(status_snapshot().get("subscription_usage")),
         "candidates": saved,
+        "route_history": route_history if route_history is not None else previous_state.get("route_history", {}),
+        "route_mode": route_mode if route_mode is not None else previous_state.get("route_mode", "unavailable"),
+        "route_policy": normalize_route_policy(route_policy if route_policy is not None else previous_state.get("route_policy")),
     }
     try:
         save_json_file(args.state_file, state)

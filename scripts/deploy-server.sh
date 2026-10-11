@@ -62,6 +62,7 @@ fi
 
 EXCLUDES=(
     --exclude ".git/"
+    --exclude "runtime/"
     --exclude ".DS_Store"
     --exclude "__pycache__/"
     --exclude "*.pyc"

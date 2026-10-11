@@ -5,6 +5,7 @@ proxy_xray/__pycache__/
 assets/
 .env
 state.json
+runtime/
 vless-extra.txt
 vless-lan-qr.png
 status-current.png

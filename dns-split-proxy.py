@@ -291,19 +291,19 @@ class DNSHandler:
         bootstrap = qclass == "global" and cls.bootstrap.contains(qname)
         route = "direct" if qclass == "ru" or bootstrap else cls.global_route
         route_label = route
-        if (
-            qclass == "global"
-            and not bootstrap
-            and route != "direct"
-            and cls.proxy_ready_file
-            and not os.path.exists(cls.proxy_ready_file)
-        ):
-            route = "direct"
-            route_label = "direct-startup"
         cached = cls.cache.get(packet)
         if qclass == "global" and not bootstrap and cached:
             cls.set_query_status(status="ok", query_class=qclass, route="cache-fresh", bootstrap=False)
             return cached
+        if (qclass == "global" and not bootstrap and route != "direct"
+                and cls.proxy_ready_file and not os.path.exists(cls.proxy_ready_file)):
+            stale = cls.cache.get(packet, stale=True)
+            if stale:
+                cls.set_query_status(status="warn", query_class=qclass, route="cache-stale", bootstrap=False)
+                return stale
+            cls.set_query_status(status="fail", query_class=qclass, route="blocked-no-route",
+                                 bootstrap=False, error="foreign route is not verified")
+            raise OSError("foreign DNS blocked until a route is verified")
         with cls.upstream_lock:
             start = cls.last_good.get(qclass, 0) % len(upstreams)
         ordered = upstreams[start:] + upstreams[:start]

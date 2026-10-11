@@ -104,40 +104,18 @@ def compact_candidate(candidate):
 
 def build_diagnostics(args):
     snapshot = status_snapshot()
-    active_backend = snapshot.get("active_backend") or {}
-    hot_standby = snapshot.get("hot_standby") or {}
-    active_path = snapshot.get("active_path") or {}
-    urls = diagnostic_urls(args)
     data = {
         "generated_at": time.time(),
-        "summary": {
-            "mode": snapshot.get("mode"),
-            "xray_running": snapshot.get("xray_running"),
-            "failover_state": snapshot.get("failover_state"),
-            "last_health": snapshot.get("last_health"),
-            "last_quality": snapshot.get("last_quality"),
-            "last_throughput": snapshot.get("last_throughput"),
-            "last_switch": snapshot.get("last_switch"),
-            "subscription": snapshot.get("last_subscription_status"),
-            "assets": snapshot.get("assets"),
-        },
-        "active": {
-            "slot": active_backend.get("name"),
-            "running": active_backend.get("running"),
-            "healthy": active_backend.get("healthy"),
-            "selected_tag": active_path.get("selected_tag"),
-            "selected": compact_candidate(active_path.get("selected") or active_backend.get("candidate")),
-            "pool_size": active_backend.get("pool_size") or len(snapshot.get("active_pool") or []),
-        },
-        "standby": {
-            "slot": hot_standby.get("name"),
-            "running": hot_standby.get("running"),
-            "healthy": hot_standby.get("healthy"),
-            "selected": compact_candidate(hot_standby.get("candidate")),
-            "pool_size": hot_standby.get("pool_size") or len(snapshot.get("standby_pool") or []),
-        },
-        "dns": build_dns_diagnostics(args),
+        "summary": {key: snapshot.get(key) for key in (
+            "mode", "route_mode", "xray_running", "route_transition", "route_checks",
+            "last_health", "last_quality", "last_throughput", "last_switch", "assets")},
+        "exit": snapshot.get("exit"),
+        "relay": snapshot.get("relay"),
+        "exit_pool": snapshot.get("exit_pool"),
+        "relay_pool": snapshot.get("relay_pool"),
+        "dns": {"ru": (snapshot.get("health_checks") or {}).get("dns_ru"),
+                "global": (snapshot.get("health_checks") or {}).get("dns_global")},
         "dns_transport": dns_transport_snapshot(args),
-        "probes": [probe_url(url, args) for url in urls],
+        "probes": snapshot.get("diagnostic_probes") or [],
     }
     return redact_value(data)

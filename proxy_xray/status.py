@@ -2,6 +2,7 @@ from collections import Counter, deque
 import json
 import threading
 import time
+import uuid
 
 
 LOG_BUFFER = deque(maxlen=500)
@@ -21,65 +22,23 @@ DEFAULT_HEALTH_CHECKS = {
     "telegram": {"status": "unknown", "label": "Telegram", "detail": "not checked yet"},
 }
 STATUS = {
-    "started_at": time.time(),
-    "mode": "native-balancer",
-    "xray_running": False,
-    "candidates_count": 0,
-    "sources": {},
-    "active_pool": [],
-    "active_path": None,
-    "active_observatory": None,
-    "active_backend": None,
-    "hot_standby": None,
-    "standby_pool": [],
-    "standby_observatory": None,
-    "last_refresh_at": None,
-    "last_subscription_success_at": None,
-    "last_health": None,
-    "last_quality": None,
-    "last_throughput": None,
-    "health_checks": DEFAULT_HEALTH_CHECKS,
-    "last_health_checks_at": None,
-    "last_subscription_status": None,
-    "subscription_fetch": {"mode": None, "proxy": None, "proxy_allowed": False, "last_method": None},
-    "subscription_usage": None,
-    "assets": None,
-    "last_candidate_check": None,
-    "next_candidate_check_at": None,
-    "candidate_checker": {"enabled": False, "min_interval": None, "max_interval": None},
-    "standby_policy": {"max_age": None, "cooldown": None, "quarantine_duration": None},
-    "switch_cooldown_until": None,
-    "failover_state": {
-        "state": "idle",
-        "kind": "none",
-        "reason": None,
-        "full_failure": False,
-        "standby_ready": False,
-        "cooldown_remaining": 0,
-    },
-    "last_switch": None,
-    "manual_extra_mode": {"active": False, "pool_size": 0, "last_removed": None},
-    "quarantine_count": 0,
-    "failures": 0,
-    "slow_checks": 0,
-    "quality_slow_checks": 0,
-    "throughput_slow_checks": 0,
-    "last_event": None,
-    "candidates": [],
-    "tested_live_candidates": [],
-    "routing": {"direct_domains": [], "direct_ips": [], "balancers": []},
-    "dns_transport": {
-        "enabled": False,
-        "global_route": "direct",
-        "direct_fallback": False,
-        "last_status": None,
-        "last_route": None,
-    },
+    "started_at": time.time(), "mode": "amsterdam-chain", "route_mode": "unavailable",
+    "route_policy": "auto", "route_policy_command": None,
+    "xray_running": False, "candidates_count": 0, "sources": {}, "exit_pool": [], "relay_pool": [],
+    "exit": None, "relay": None, "route_checks": {}, "route_transition": {},
+    "active_path": None, "last_refresh_at": None, "last_subscription_success_at": None,
+    "last_health": None, "last_quality": None, "last_throughput": None,
+    "health_checks": DEFAULT_HEALTH_CHECKS, "last_health_checks_at": None,
+    "last_subscription_status": None, "subscription_fetch": {}, "subscription_usage": None,
+    "assets": None, "last_candidate_check": None, "next_candidate_check_at": None,
+    "last_switch": None, "last_event": None, "failures": 0, "quarantine_count": 0,
+    "candidates": [], "tested_live_candidates": [], "routing": {},
+    "dns_transport": {"enabled": True, "global_route": "socks", "direct_fallback": False},
 }
 
 
 def log(message):
-    line = f"[sub] {message}"
+    line = message if message.startswith("[chain]") else f"[gateway] {message}"
     LOG_BUFFER.append({"time": time.time(), "line": line})
     with STATUS_LOCK:
         STATUS["last_event"] = {"time": time.time(), "message": message}
@@ -93,12 +52,24 @@ def set_status(**kwargs):
 
 def enqueue_control_command(name, payload=None):
     command = {
-        "id": f"{int(time.time() * 1000)}-{len(CONTROL_COMMANDS)}",
+        "id": uuid.uuid4().hex,
         "name": name,
         "payload": payload or {},
         "queued_at": time.time(),
     }
     with STATUS_LOCK:
+        if name == "recheck_route":
+            pending = STATUS.get("last_control_command") or {}
+            if pending.get("name") == name and pending.get("status") in ("queued", "running"):
+                return pending
+        if name == "route_policy":
+            pending = STATUS.get("route_policy_command") or {}
+            if pending.get("status") in ("queued", "running") and pending.get("payload") == command["payload"]:
+                return pending
+            retained = [item for item in CONTROL_COMMANDS if item["name"] != name]
+            CONTROL_COMMANDS.clear()
+            CONTROL_COMMANDS.extend(retained)
+            STATUS["route_policy_command"] = {**command, "status": "queued"}
         CONTROL_COMMANDS.append(command)
         STATUS["last_control_command"] = {
             **command,
@@ -117,12 +88,17 @@ def pop_control_commands():
 
 def mark_control_command(command, status, detail=None):
     with STATUS_LOCK:
-        STATUS["last_control_command"] = {
+        record = {
             **command,
             "status": status,
             "detail": detail,
             "finished_at": time.time(),
         }
+        STATUS["last_control_command"] = record
+        if command["name"] == "route_policy":
+            pending = STATUS.get("route_policy_command") or {}
+            if pending.get("id") == command["id"]:
+                STATUS["route_policy_command"] = record
 
 
 def public_candidate(candidate):

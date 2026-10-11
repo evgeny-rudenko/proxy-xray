@@ -1,6 +1,6 @@
 import unittest
 
-from proxy_xray.xray_api import candidate_by_runtime_tag, parse_balancer_selected_tag, parse_balancer_select_tags
+from proxy_xray.xray_api import parse_balancer_selected_tag, parse_balancer_select_tags
 
 
 class XrayApiTest(unittest.TestCase):
@@ -18,15 +18,12 @@ class XrayApiTest(unittest.TestCase):
     def test_parse_balancer_selected_tag_from_text_fallback(self):
         self.assertEqual("proxy-extra-1", parse_balancer_selected_tag('selected: "proxy-extra-1"'))
 
-    def test_runtime_tag_uses_pool_order_instead_of_persistent_candidate_tag(self):
-        candidates = [
-            {"tag": "proxy-extra-3", "source": "extra", "name": "first in runtime config"},
-            {"tag": "proxy-extra-1", "source": "extra", "name": "second in runtime config"},
-        ]
+    def test_missing_selection_is_unknown_not_guessed_from_fallback(self):
+        self.assertIsNone(parse_balancer_selected_tag("- Selecting Override:\n  1\n- Selects:\n"))
 
-        selected = candidate_by_runtime_tag(candidates, "proxy-extra-0")
-
-        self.assertEqual("first in runtime config", selected["name"])
+    def test_prefixed_chain_tag_is_preserved(self):
+        self.assertEqual("exit-chain-proxy-extra-3", parse_balancer_selected_tag(
+            "- Selects:\n 1 exit-chain-proxy-extra-3\n"))
 
 
 if __name__ == "__main__":

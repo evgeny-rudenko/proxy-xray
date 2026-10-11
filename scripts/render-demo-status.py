@@ -47,10 +47,11 @@ def main():
         candidate("proxy-sub-25", "subscription", "Ukraine", "ua-edge.example.net", 443, "tcp", "reality", 1272.611, 0.513, 18600, 1000),
         candidate("proxy-sub-42", "subscription", "Germany Extra", "de-extra.example.net", 443, "tcp", "reality", 1212.078, 0.310, 23000, 26),
     ]
-    current = live[-1]
-    hot = live[0]
-    active_pool = [current, live[1], live[7]]
-    standby_pool = [hot, live[8], live[9]]
+    current = live[7]
+    exits = [current, live[8],
+             candidate("proxy-extra-2", "extra", "Amsterdam XHTTP", "ams.example.net", 443, "xhttp", "tls", 1400, .23, None, 15),
+             candidate("proxy-extra-3", "extra", "Amsterdam gRPC", "ams.example.net", 8443, "grpc", "tls", 1450, .21, None, 20)]
+    relays = live[:3]
     generated_live = [
         candidate(
             f"proxy-sub-{index}",
@@ -100,7 +101,14 @@ def main():
     status.STATUS.update(
         {
             "started_at": now - 18530,
-            "mode": "native-balancer",
+            "mode": "amsterdam-chain",
+            "route_mode": "direct_amsterdam",
+            "exit": {"location": "Amsterdam (configured)", "transport": current, "selected_tag": "exit-direct-proxy-extra-0"},
+            "relay": {"transport": None, "selected_tag": "UNKNOWN"},
+            "exit_pool": exits,
+            "relay_pool": relays,
+            "route_checks": {"direct_amsterdam": {"ok": True, "latency": .214, "time": now - 8}},
+            "route_transition": {"reason": "preferred route verified", "time": now - 3600, "hold_remaining": 0, "return_successes": {}},
             "xray_running": True,
             "candidates_count": 62,
             "sources": {"extra": 4, "subscription": 58},
@@ -113,10 +121,6 @@ def main():
                 "selected": current,
                 "fallback": current,
                 },
-            "active_backend": {"running": True, "candidate": current, "pool_size": 3, "socks_port": 11080, "http_port": 18123},
-            "hot_standby": {"running": True, "healthy": True, "candidate": hot, "pool_size": 3, "socks_port": 12080, "http_port": 18223},
-            "active_pool": active_pool,
-            "standby_pool": standby_pool,
             "last_refresh_at": now - 480,
             "last_subscription_success_at": now - 1220,
             "last_health": {"status": "ok", "latency": 0.214},
@@ -139,8 +143,6 @@ def main():
             "last_candidate_check": {"status": "ok", "tag": current["tag"], "latency": current["last_latency"]},
             "next_candidate_check_at": now + 184,
             "candidate_checker": {"enabled": True, "min_interval": 120, "max_interval": 300},
-            "standby": hot,
-            "standby_policy": {"max_age": 600, "cooldown": 180, "quarantine_duration": 900},
             "switch_cooldown_until": None,
             "last_switch": {"time": now - 7800, "reason": "throughput degraded", "from": "proxy-sub-2", "to": "proxy-extra-0"},
             "quarantine_count": 1,
@@ -159,16 +161,16 @@ def main():
     status.LOG_BUFFER.clear()
     for offset, line in [
         (720, "loaded 60 subscription links, 4 extra links, 62 candidates after filtering"),
-        (700, "hot standby ok proxy-sub-0, proxy-extra-1, proxy-sub-25 (0.379s)"),
+        (700, "pinned subscription_exit proxy-sub-0: ok"),
         (680, "quality download ok: 6996 kbps"),
-        (560, "hot standby ok proxy-sub-0, proxy-extra-1, proxy-sub-25 (0.408s)"),
-        (440, "hot standby ok proxy-sub-0, proxy-extra-1, proxy-sub-25 (0.425s)"),
+        (560, "pinned chained_amsterdam proxy-extra-3 via proxy-sub-0: ok"),
+        (440, "route subscription_exit -> direct_amsterdam: preferred route verified"),
         (320, "quality download ok: 5983 kbps"),
         (210, "throughput ok: 23009 kbps"),
-        (48, "hot standby ok proxy-sub-0, proxy-extra-1, proxy-sub-25 (0.353s)"),
+        (48, "pinned direct_amsterdam proxy-extra-3: ok"),
         (8, "quality download ok: 6823 kbps"),
     ]:
-        status.LOG_BUFFER.append({"time": now - offset, "line": f"[sub] {line}"})
+        status.LOG_BUFFER.append({"time": now - offset, "line": f"[chain] {line}"})
 
     os.makedirs("docs", exist_ok=True)
     with open("docs/status-dashboard-demo.html", "wb") as handle:

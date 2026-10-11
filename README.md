@@ -2,368 +2,115 @@
 
 [![Telegram](https://img.shields.io/badge/Telegram-@endominion-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/endominion)
 
-Dockerized Xray gateway for a home LAN.
+[Русская версия](README.ru.md)
 
-Русская версия: [README.ru.md](README.ru.md).
+## Amsterdam Exit Architecture
 
-The project runs Xray-Core behind stable local ports and supervises a pool of VLESS servers from a subscription plus an optional private server list. It keeps a hot standby connection ready, checks degradation, switches away from bad paths, exposes a simple status page, and routes Russian domains/IP ranges directly.
+This experimental branch uses a private Amsterdam server as the preferred exit:
+1. Direct Amsterdam.
+2. Subscription relay → Amsterdam when the direct path fails.
+3. Subscription exit when Amsterdam cannot be reached through the tested paths.
+4. Block foreign traffic if no route works; keep RU routing direct.
 
-## What It Provides
+The private exit transports come only from `vless-extra.txt`. Subscription nodes are first-hop relays or emergency exits, never mixed into the Amsterdam transport balancers. All extra transports are included; the relay pool contains at most three independently verified nodes and prefers different hosts.
 
-- SOCKS proxy on `1080`.
-- HTTP proxy on `8123`.
-- Optional plain LAN VLESS inbound on `10086`.
-- Local status UI on `18080`.
-- VLESS subscription refresh every two hours by default.
-- Extra private VLESS links from `vless-extra.txt`.
-- Two active Xray slots: current path plus hot standby.
-- Liveness, latency, small quality download, throughput, and random candidate checks.
-- RU split DNS and direct routing for `.ru`, `.su`, `.рф`, `geosite:category-ru`, and `geoip:ru`.
-- LoyalSoldier `geoip.dat` / `geosite.dat` asset management.
-- Telegram notification after successful failover recovery.
-- SSH deploy script for a home server.
+Xray uses separate `leastPing` balancers and a `dialerProxy`/loopback chain. Route changes use Routing API, without restarting the working core. Only pool/configuration changes need a staged replacement. The old active/hot mixed pools and Extra Pool override are removed.
 
-## Repository Safety
+## Setup
 
-Real connection data is intentionally not tracked.
-
-Ignored local files:
-
-- `.env` - subscription URL, Telegram token/chat id, LAN VLESS UUID.
-- `vless-extra.txt` - private VLESS links.
-- `state.json` - cached subscription candidates and measured server state.
-- `vless-lan-qr.png` - local QR code.
-- `assets/` - downloaded geo assets.
-
-Use the example files as templates:
-
-```shell
+```sh
 cp .env.example .env
 cp vless-extra.example.txt vless-extra.txt
-cp state.example.json state.json
-mkdir -p assets
 ```
 
-Then edit `.env` and `vless-extra.txt`.
+Set `XRAY_SUB_URL` to your provider's subscription URL. Put one private Amsterdam VLESS link per line in `vless-extra.txt`; keep its TLS/Reality/gRPC/XHTTP parameters unchanged.
 
-## Configuration
+Generate `INBOUND_VLESS_ID` once:
+```sh
+python3 -c 'import uuid; print(uuid.uuid4())'
+```
+This UUID is your gateway's LAN client credential, not an upstream server ID. Use the same UUID in clients. The LAN inbound has no TLS and must not be exposed to the internet.
 
-`.env`:
+Optional Telegram:
+- Create a bot using **@BotFather** and place its HTTP API token in `TELEGRAM_BOT_TOKEN`.
+- Send the bot a message. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` privately and use `message.chat.id` as `TELEGRAM_CHAT_ID`. Do not publish the URL or response.
+- `TZ=Europe/Moscow` controls displayed times.
 
-```shell
-# VLESS subscription URL from your provider.
-XRAY_SUB_URL=https://example.com/subscription
-
-# Non-RU DNS transport: socks (recommended), http, or direct.
-# direct completely disables DNS encapsulation through VLESS.
-DNS_GLOBAL_ROUTE=socks
-
-# UUID for local LAN clients connecting to this gateway on port 10086.
-# Generate once with: python3 -c 'import uuid; print(uuid.uuid4())'
-# Use the same value in V2RayTun / VLESS client config.
-INBOUND_VLESS_ID=00000000-0000-0000-0000-000000000000
-
-# Optional Telegram notification settings.
-# TELEGRAM_BOT_TOKEN: create a bot with @BotFather and copy its HTTP API token.
-# TELEGRAM_CHAT_ID: send any message to the bot, then run:
-# curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
-# Use message.chat.id from the response.
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-
-TZ=Europe/Moscow
+```sh
+docker compose config --quiet
+docker compose up -d --build
 ```
 
-`INBOUND_VLESS_ID` is not issued by the subscription provider. It is your own local client UUID for the inbound VLESS listener on the home gateway. Generate it once, keep it in `.env`, and use the same UUID when creating the LAN VLESS client profile.
+## Ports And Clients
 
-Telegram notifications are optional. Create a bot through `@BotFather`, put the returned API token into `TELEGRAM_BOT_TOKEN`, send any message to that bot from your Telegram account, then call `getUpdates` and copy `message.chat.id` into `TELEGRAM_CHAT_ID`.
-
-`vless-extra.txt` contains one private VLESS URI per line. These servers are not refreshed from the subscription and are sampled more often by the candidate checker.
-
-## Run Locally
-
-```shell
-docker compose build proxy-xray
-docker compose up -d --force-recreate
-```
-
-Check status:
-
-```shell
-curl http://127.0.0.1:18080/json
-docker logs proxy-xray --tail 80
-```
-
-Open the UI:
-
-```text
-http://127.0.0.1:18080/
-```
-
-## Ports
-
-| Port | Purpose |
+| TCP port | Service |
 | --- | --- |
-| `1080/tcp` | SOCKS proxy |
-| `1080/udp` | SOCKS UDP |
-| `8123/tcp` | HTTP proxy |
-| `10086/tcp` | LAN VLESS inbound |
-| `18080/tcp` | Status web UI |
+| 1080 | SOCKS5 |
+| 8123 | HTTP proxy, including HTTPS CONNECT |
+| 10086 | LAN VLESS |
+| 18080 | Dashboard, diagnostics, logs and client QR |
 
-The DNS relay exists inside the container, but compose does not publish port `53` by default.
+Set an HTTP client to `http://<gateway-LAN-IP>:8123`. Firefox SOCKS5 clients should enable **Proxy DNS when using SOCKS v5**.
+Open `http://<gateway-LAN-IP>:18080/client`, or click **QR**, to obtain the LAN VLESS link and QR. Using localhost creates a link unsuitable for other devices.
 
-## LAN VLESS Client
+Only these ports are published. Core API, probe ports and the DNS transport entrypoint bind to loopback. Public SOCKS UDP forwarding is not provided by the TCP front switch.
 
-When `--inbound-vless` is enabled, LAN clients can connect to the gateway through the local VLESS inbound on port `10086`.
+## Recovery And DNS
 
-The easiest way to get the client profile is through the status UI:
+Selected-path checks run every 20 seconds, with two independent health sites. Two consecutive failed cycles trigger a verified alternate route. Returning from emergency subscription egress to the Amsterdam chain requires three successful checks spaced by 20 seconds and a 180-second hold. Returning to direct Amsterdam additionally requires five minutes of uninterrupted balanced-route health checks; a failed check or a gap over 2.5 configured check intervals (50 seconds by default) resets that window. Individual pinned transport checks cannot authorize this return.
 
-1. Open the status UI through the server LAN address, not `127.0.0.1`:
+If direct Amsterdam fails within three minutes of activation, the next voluntary return is delayed by ten minutes, increasing to fifteen minutes after another rapid failure. Five minutes of stable operation on the active direct path resets this penalty. In normal policy, a real failure of the current route bypasses all return waits: a recently verified direct path can still rescue connectivity. Startup opens the first permitted verified route without waiting five minutes. The dashboard shows direct-path stability and retry countdowns; a healthy Amsterdam chain is not replaced merely because a brief direct probe succeeded.
 
-   ```text
-   http://HOME_SERVER_IP:18080/
-   ```
+Pinned checks distinguish a broken relay from a broken Amsterdam path. Each exit transport can use only relays with a verified pair: healthy Internet egress does not prove access to Amsterdam. Per-exit balancers reuse the same three relay outbounds without additional subscription copies. Up to two independent relay hosts and two suitable exit transports are tested before reporting Amsterdam unreachable through tested routes. That is not proof of a data-centre outage. Candidate checks are sequential with a random 120–300 second interval. Speed measurements are warnings, not immediate failover triggers.
 
-2. Click the `Q` button in the top-right toolbar.
-3. Open the generated `/client` page.
-4. Scan the QR code from V2RayTun or copy the connection string manually.
+Split DNS is used by the container itself:
+- RU suffixes resolve through direct RU DNS; `geosite:category-ru` and `geoip:ru` route directly.
+- Foreign DNS-over-TCP uses an internal SOCKS entrypoint forced through the selected foreign route, before RU rules. There is no direct foreign-DNS fallback.
+- Endpoint/subscription bootstrap is independent of the selected exit. Amsterdam can also be resolved through a verified relay; TLS names are preserved.
+- Already cached DNS answers may remain available; new unresolved foreign queries fail when no foreign route exists.
 
-The page builds the VLESS URL from the address used to open the UI. For example, if the UI is opened as `http://192.168.2.200:18080/`, the generated client URL will point to `192.168.2.200:10086`.
+A failed core restarts with capped exponential backoff (1–30 seconds) and route verification. Existing TCP sessions cannot migrate between exits and may disconnect. A failed Amsterdam host affects all its transports. A chain adds latency and charges all chained traffic to the subscription. Startup checks and native observatory also consume traffic.
 
-Manual format:
+## Dashboard And State
 
-```text
-vless://INBOUND_VLESS_ID@HOME_SERVER_IP:10086?security=none&type=tcp#home-proxy
+The dashboard shows **exit and delivery path**, native selected transports or UNKNOWN, relay/exit pools, route check times, transition reasons, return guard, speed and subscription quota. Emergency subscription exit is yellow because the exit point changes.
+
+**Перепроверить маршрут** queues a sequential recheck. Repeated clicks are coalesced. It never locks an unverified route or bypasses return hysteresis. Blocks update without full page reload.
+
+The **Exit and delivery path** panel has a routing-policy switch:
+
+- **Обычный** (normal): direct Amsterdam, then subscription → Amsterdam, then emergency subscription exit.
+- **Subscription → Amsterdam**: prefer the chain, with emergency subscription exit if the chain fails. Direct Amsterdam is never selected, even after restart or core/configuration recovery. Supervisor direct-Amsterdam checks are disabled; relay checks remain sequential. Native Xray observatory may still probe configured direct transports; these probes do not authorize user traffic through Direct.
+
+The choice is saved atomically in private state and survives restart. A failed save leaves the previous choice unchanged. Missing/corrupt state defaults to normal, with foreign traffic blocked until a route is verified. If all permitted routes fail, foreign traffic and uncached global DNS fail closed; RU stays direct. The UI separates requested policy, application status and actual route; subscription emergency exit stays yellow. Switching policy does not restart Xray or migrate existing TCP sessions: reconnect clients to stop using an old path. Returning to normal keeps the existing Direct recovery guards.
+
+`POST /control/route-policy` accepts JSON `{"policy":"auto"}` or `{"policy":"subscription_only"}` and returns a queued command ID. Commands run sequentially; the latest queued choice wins. Foreign-Origin requests are rejected and CORS is not enabled. `/json` includes `route_policy` and `route_policy_command` separately from actual `route_mode`. Web UI remains LAN-only and unauthenticated; do not expose it to the internet.
+
+Endpoints: `/`, `/json`, `/logs`, `/diagnostics`, `/diagnostics.json`, `/diagnostics/bundle`, `/servers/live`, `/servers/all`, `/client`. Diagnostics read saved checks instead of starting parallel network probes. The classic dashboard is removed.
+
+State is private: `runtime/chain/state.json` contains cached subscription credentials and separate bounded exit/relay/pair histories. It is atomically replaced and synced; malformed files are moved aside. Saved successes never authorize a route after restart without new verification. The old root `state.json` is not modified. Keep `.env`, `vless-extra.txt`, `state.json`, `runtime/` and generated QR artifacts out of Git and backups intended for sharing.
+
+## Settings And Tests
+
+`docker compose run --rm proxy-xray --help` lists the supported entrypoint flags. Defaults: `--relay-pool-size 3`, `--check-interval 20`, `--max-failures 2`, `--return-successes 3`, `--return-hold 180`, `--direct-return-stable 300`, `--direct-retry-delay 600`, `--direct-retry-max 900`, `--direct-failure-window 180`, `--candidate-check-min-interval 120`, `--candidate-check-max-interval 300`, `--refresh-interval 7200`. The direct-return timers are process-local and reset on supervisor restart; every startup still rechecks permitted routes. A cached/extra-only startup retries subscription refresh after 30 seconds. Removed mixed-pool flags and `DNS_GLOBAL_ROUTE` are not supported.
+
+```sh
+python3 -m unittest discover -s tests
+bash -n run.sh scripts/deploy-server.sh tests/client-smoke.sh
+docker compose config --quiet
+docker run --rm --network none --entrypoint python3 \
+  -v "$PWD/proxy_xray:/proxy_xray:ro" -v "$PWD/tests:/tests:ro" \
+  proxy-xray:local /tests/chain-integration.py
+docker compose logs --tail 100
 ```
 
-Replace:
-
-- `INBOUND_VLESS_ID` with your generated value from `.env`;
-- `HOME_SERVER_IP` with the Docker host LAN IP.
-
-## How Failover Works
-
-The supervisor starts two Xray instances:
-
-- active slot: receives public `1080`, `8123`, and `10086` through a local TCP switch and runs a small Xray balancer pool;
-- standby slot: already running with a separate hot standby balancer pool and checked in the background.
-
-The default compose uses:
-
-- active pool: `3` candidates;
-- standby pool: `3` candidates.
-- extra reserve: `1` live private extra URI per active/standby slot when available;
-- hot standby fast switch: `1` full active-path failure when standby is already healthy.
-- liveness check: every `20` seconds, failover after `2` failures;
-- quality download: every `60` seconds, 512 KB, failover after `2` slow checks;
-- heavy throughput: every `300` seconds, used as a quality metric by default.
-
-Each slot has a score-ordered pool. Xray can choose between several outbounds inside the slot, and the first outbound remains the native Xray fallback if observatory cannot choose one.
-
-Important connection behavior:
-
-- Xray chooses an outbound from the active pool for new connections.
-- Xray does not migrate an already opened TCP connection to another outbound.
-- If the currently selected outbound dies or degrades, new browser/app requests can move to another outbound inside the same active pool.
-- Existing downloads, media streams, or image requests can still stall or break for a short time because they were opened through the old outbound.
-- If the whole active slot is unhealthy or degraded, the supervisor switches the public ports to the hot standby slot.
-
-This means short interruptions are expected during a bad-server event. The goal is to make new connections recover quickly, not to make every existing TCP session survive a server failure.
-
-Failover can be triggered by:
-
-- repeated health-check failures;
-- repeated high latency;
-- repeated low quality-download speed;
-- unhealthy current slot with a healthy hot standby available.
-
-On successful switch:
-
-1. Public ports are pointed to the standby slot.
-2. The previous active pool head is soft-quarantined.
-3. A new standby is built.
-4. `state.json` is updated.
-5. Telegram notification is sent if configured.
-
-Candidate checks are intentionally sequential. One random candidate is tested every 2-5 minutes by default, with extra-list servers weighted higher. This avoids hammering a subscription with many concurrent VLESS connections.
-
-At startup the active slot must pass a preflight health check before public ports are attached to it. If the first outbound in the pool is dead, it is soft-quarantined and another pool is tried.
-
-### Manual Extra Pool Override
-
-The primary dashboard has an `Extra pool` button in the top toolbar. It is an emergency one-shot override for cases where subscription servers are globally degraded but private extra links still work better.
-
-When clicked and confirmed, the supervisor tests each configured `extra` VLESS link from `vless-extra.txt` separately, sequentially: two consecutive successful health requests and a small quality download are required. A transient failure is retried. Only verified transports enter the pool. gRPC and XHTTP are preferred as startup/fallback transports; native `leastPing` still chooses among the pool's live transports by latency. This intentionally ignores the normal `active pool: 3` size and same-host limits for that one rebuild.
-
-The verified pool starts on a temporary, loopback-only Xray slot while the current active path and hot standby stay running. After a sequential observatory warmup, repeated pool health checks and a quality download must pass before public ports switch. If balancing fails, the preferred verified transport is tried alone. The original hot standby is retained; the temporary slot becomes the active slot on success and is cleaned up on rejection. Preparation can take a minute or more, especially when transports time out.
-
-While manual mode is active, failed health requests are retried, and the usual `max_failures` threshold applies instead of the one-cycle hot-standby shortcut. Recovery rechecks transports individually. A failed pooled request or an API selection snapshot alone never quarantines a transport. Only confirmed individual failures do; if no staged extra path passes, the supervisor returns to the preserved regular standby. Degradation respects the switch cooldown, but total failure does not. Existing TCP sessions can still be interrupted during a slot switch.
-
-## State File
-
-`state.json` uses schema v2 and stores candidate cache plus a bounded quality history:
-
-- last OK/fail timestamps;
-- last latency and throughput;
-- last `50` recent checks per candidate;
-- rolling success rate, failure streak, latency EWMA, and throughput EWMA.
-
-The file is written atomically. If it is corrupted, startup moves it to `state.json.corrupt.<timestamp>` and continues with an empty state instead of crashing.
-
-## Routing And DNS
-
-The default compose routes Russian resources directly:
-
-- `geosite:category-ru`
-- `regexp:.*\.ru$`
-- `regexp:.*\.su$`
-- `regexp:.*\.xn--p1ai$`
-- `geoip:ru`
-
-Split DNS is enabled:
-
-- RU domains use `77.88.8.8,77.88.8.1`;
-- other domains use `8.8.8.8,1.1.1.1` through the active VLESS pool;
-- `DNS_GLOBAL_ROUTE=socks` sends DNS-over-TCP through the SOCKS proxy on `1080`;
-- `DNS_GLOBAL_ROUTE=http` uses HTTP `CONNECT` through the HTTP proxy on `8123`;
-- `DNS_GLOBAL_ROUTE=direct` disables encapsulation and restores direct DNS-over-TCP;
-- direct fallback for normal global domains is disabled by default, preventing silent DNS bypass around VLESS;
-- positive responses are cached in memory and stale cache entries cover short failover windows.
-
-The subscription URL host and all VLESS endpoint hosts are maintained in an automatic bootstrap list and resolved directly over DNS-over-TCP. This prevents a startup loop where DNS waits for VLESS while VLESS waits for DNS. Only connection-infrastructure names use bootstrap resolution.
-
-Before the proxy switch becomes ready, startup queries temporarily use direct DNS-over-TCP so an initial subscription redirect can complete. Normal global DNS automatically moves to the configured VLESS transport after port `1080` or `8123` is ready.
-
-The user-facing proxies remain independent:
-
-- SOCKS5 `1080`: clients must pass the hostname to the proxy. In Firefox enable `Proxy DNS when using SOCKS v5`;
-- HTTP proxy `8123`: HTTPS destinations are passed by hostname through `CONNECT`;
-- LAN VLESS `10086`: destination hostnames pass through the inbound VLESS connection and active outbound.
-
-To disable DNS-over-VLESS without changing any proxy or routing settings, set:
-
-```shell
-DNS_GLOBAL_ROUTE=direct
+The isolated integration tests use synthetic VLESS servers and no internet access. Only their fixtures allow loopback destinations; production restrictions remain unchanged. An optional live check compares the same exit IPv4 via two actual relays without printing addresses or credentials:
+```sh
+docker compose exec -T proxy-xray python3 - < scripts/check-chain-live.py
 ```
 
-and recreate the container.
-
-Xray sniffing is enabled on SOCKS, HTTP, and LAN VLESS inbounds with `routeOnly`, so TLS SNI / HTTP Host can be used for routing without rewriting the destination.
-
-## Geo Assets
-
-LoyalSoldier assets are stored in `./assets`:
-
-- `geoip.dat`
-- `geosite.dat`
-- `assets-state.json`
-
-The image seeds bundled assets. Runtime refresh happens on schedule, but compose uses `--no-asset-refresh-on-start` so a slow GitHub download does not block container startup.
-
-## Status UI
-
-Available endpoints:
-
-- `/` - primary operator dashboard.
-- `/status` - alias for the primary dashboard.
-- `/dashboard-v5` - alias for the primary dashboard kept for bookmarked test links.
-- `/dashboard-classic` - previous dashboard layout kept for comparison.
-- `/client` - LAN VLESS connection string and QR code.
-- `/servers/live` - tested live servers.
-- `/servers/all` - all candidates.
-- `/json` - machine-readable status.
-- `/fragments/dashboard-v5` - small HTML fragments used for primary dashboard updates.
-- `/fragments/status` - small HTML fragments used by the classic dashboard.
-- `/control/force-extra-pool` - local POST action used by the `Extra pool` emergency override button.
-- `/diagnostics` - live direct/SOCKS/HTTP URL probes and DNS probes.
-- `/diagnostics.json` - machine-readable sanitized diagnostic output.
-- `/diagnostics/bundle` - downloadable sanitized diagnostic JSON.
-- `/logs` - recent supervisor logs.
-
-The dashboards do not use full-page auto-refresh. They update dynamic blocks in place every 15 seconds.
-
-The screenshots below use synthetic demo data. Server names, endpoints, IDs, and operational details are not real.
-
-![proxy-xray status dashboard](docs/status-dashboard.jpg)
-
-![proxy-xray live servers](docs/status-live-servers.jpg)
-
-The dashboard shows:
-
-- health indicators;
-- current connection;
-- hot standby;
-- active path selected by Xray balancer API;
-- active and standby observatory snapshots in `/json`;
-- candidate scores;
-- throughput;
-- subscription state;
-- geo asset state;
-- diagnostic probe entry point;
-- recent logs.
-
-## Deploy To A Home Server
-
-The deploy script syncs files over SSH, preserves server runtime state, rebuilds the image, and recreates the container.
-
-```shell
-DEPLOY_HOST=192.168.1.10 \
-DEPLOY_USER=user \
-DEPLOY_PATH=/home/user/proxy-xray \
-scripts/deploy-server.sh
-```
-
-By default it copies local `.env` and `vless-extra.txt`, but keeps server-side `state.json` and `assets/`.
-
-See [DEPLOY.md](DEPLOY.md) for options.
-
-## Smoke Tests
-
-Run the client smoke container:
-
-```shell
-docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm proxy-client-test
-```
-
-It checks:
-
-- status UI;
-- SOCKS proxy;
-- HTTP proxy;
-- LAN VLESS inbound;
-- basic throughput;
-- small quality download status;
-- split DNS behavior;
-- RU direct-routing smoke access;
-- bundled LoyalSoldier assets.
-
-## Useful Commands
-
-Rebuild and restart:
-
-```shell
-docker compose build proxy-xray
-docker compose up -d --force-recreate
-```
-
-Watch logs:
-
-```shell
-docker logs -f proxy-xray
-```
-
-Check current public HTTP proxy:
-
-```shell
-curl -x http://127.0.0.1:8123 https://www.gstatic.com/generate_204 -i
-```
-
-Check SOCKS:
-
-```shell
-curl -x socks5h://127.0.0.1:1080 https://checkip.amazonaws.com
-```
+This branch is being tested locally. No automatic home-server deployment is performed. Several-hour operational observation remains a separate acceptance step.
 
 ## Credits
 
-This project started from the original `samuelhbne/proxy-xray` Docker wrapper for Xray-Core, then grew into a subscription supervisor and home LAN gateway with hot standby failover, split DNS, status UI, and deployment tooling.
+Originally based on the samuelhbne/proxy-xray Docker wrapper; extended with supervision, split DNS, diagnostics, UI and Amsterdam chaining.

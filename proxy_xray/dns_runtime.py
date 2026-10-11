@@ -75,10 +75,16 @@ def dns_transport_snapshot(args):
         runtime = load_json_file(status_file, {}) if status_file else {}
     except (OSError, TypeError, ValueError):
         runtime = {"status": "unknown", "error": "DNS status file is unreadable"}
+    if not isinstance(runtime, dict):
+        runtime = {"status": "unknown", "error": "invalid DNS status"}
+    try:
+        age = max(0, time.time() - float(runtime["time"])) if runtime.get("time") else None
+    except (TypeError, ValueError):
+        age = None
     return {
         "enabled": route != "direct",
         "global_route": route,
-        "proxy": f"{route}://127.0.0.1:{8123 if route == 'http' else 1080}" if route != "direct" else None,
+        "proxy": "socks://127.0.0.1:10953" if route != "direct" else None,
         "bootstrap_file": getattr(args, "dns_bootstrap_file", None),
         "proxy_ready": bool(
             getattr(args, "dns_proxy_ready_file", None)
@@ -92,5 +98,5 @@ def dns_transport_snapshot(args):
         "last_upstream": runtime.get("upstream"),
         "last_bootstrap": runtime.get("bootstrap"),
         "last_error": runtime.get("error"),
-        "status_age": max(0, time.time() - float(runtime["time"])) if runtime.get("time") else None,
+        "status_age": age,
     }

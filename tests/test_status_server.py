@@ -24,7 +24,7 @@ class StatusServerLogOrderTest(unittest.TestCase):
         self.assertLess(html.index("middle event"), html.index("old event"))
 
     def test_control_command_is_queued_once_for_supervisor(self):
-        command = enqueue_control_command("force_extra_pool")
+        command = enqueue_control_command("recheck_route")
 
         self.assertEqual("queued", status_snapshot()["last_control_command"]["status"])
         self.assertEqual([command], pop_control_commands())

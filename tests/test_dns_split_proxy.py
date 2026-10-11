@@ -67,12 +67,19 @@ class DnsSplitProxyTests(unittest.TestCase):
             DNS.DNSHandler.resolve(query_packet("edge.example", 3))
         self.assertEqual(routes, ["direct", "direct"])
 
-    def test_global_query_uses_direct_dns_only_before_proxy_is_ready(self):
+    def test_global_query_is_blocked_before_proxy_is_ready(self):
         packet = query_packet("redirected-subscription.example")
         DNS.DNSHandler.proxy_ready_file = "/path/that/does/not/exist"
         with mock.patch.object(DNS, "query_tcp", return_value=positive_response(packet)) as query:
-            DNS.DNSHandler.resolve(packet)
-        self.assertEqual(query.call_args.kwargs["route"], "direct")
+            with self.assertRaises(OSError):
+                DNS.DNSHandler.resolve(packet)
+        query.assert_not_called()
+
+    def test_foreign_dns_failure_never_falls_back_direct(self):
+        with mock.patch.object(DNS, "query_tcp", side_effect=OSError("offline")) as query:
+            with self.assertRaises(OSError):
+                DNS.DNSHandler.resolve(query_packet("youtube.com"))
+        self.assertTrue(all(call.kwargs["route"] == "socks" for call in query.call_args_list))
 
     def test_positive_global_response_is_served_from_cache(self):
         first = query_packet("github.com", 10)
